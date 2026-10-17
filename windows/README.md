@@ -29,6 +29,37 @@ run a command directly:
 `install -Profile minimal|standard|full` chooses what goes on the box
 (`standard`, the default, includes Docker), exactly as on Linux.
 
+## Configuration (`serverkit-windows.json`)
+
+Every owner-specific value lives in one file. Copy the template and edit it:
+
+```powershell
+copy windows\serverkit-windows.example.json windows\serverkit-windows.json
+```
+
+`serverkit-windows.json` is gitignored; the example is committed. Without it
+the gateway, sites and sync scripts stop with a message that says exactly this.
+`install` and `start` work without it.
+
+| Key | Meaning |
+|---|---|
+| `windows.user_profile`, `windows.repo_root`, `windows.python` | your Windows profile, this repository and the Python used through WSL interop (`skctl` and `state_dir` are optional overrides) |
+| `wsl.distro` | distro name (default `ServerKit`) |
+| `domain.base`, `domain.gateway_label`, `domain.panel_label` | `<site>.<base>`, `<gateway_label>.<base>` (REST/MCP), `<panel_label>.<base>` (panel, webhooks) |
+| `tunnel.name`, `tunnel.wildcard` | Cloudflare tunnel; wildcard mode, see below |
+| `github.owners` | GitHub users/organisations the gateway may publish from |
+| `ports.min` / `ports.max`, `reserved_names` | site port range and names that cannot be used |
+| `limits.*` | databases per site, cron jobs per site and minimum interval, requests per minute, bad-key lockout |
+| `panel.url`, `panel.port`, `panel.public_url` | local panel address, Flask port (used by `gateway.mode` core), the public address GitHub calls for webhooks |
+| `auto_deploy_mode` | `webhook` (default) or `poll` |
+| `gateway.mode`, `gateway.port` | `local` (default) or `core`; gateway port |
+| `brain.vault`, `brain.notes_dir` | notes vault for `brain/note.py` (optional) |
+
+Python reads it through `swk_config.py`, shell through `lib/config.sh`
+(`swk_cfg domain`), PowerShell directly in `ServerKit.ps1`. A different file can
+be named with `SERVERKIT_WINDOWS_CONFIG`. Values still equal to the example
+(`example.com`, `your-tunnel`, `C:\Users\YOU...`) are rejected.
+
 ## What it sets up
 
 - A WSL2 distro named `ServerKit` (Ubuntu 24.04), separate from any other
@@ -69,6 +100,58 @@ overlay lives on a local `serverkit` branch there, so the GitHub repositories
 are never written to. Generated passwords and secrets are stored as the
 service's variables in the panel (Service → Environment).
 
+### Auto-deploy: core webhook (default) or polling
+
+`"auto_deploy_mode": "webhook"` uses the panel's own GitHub webhook instead of
+the old 3-minute polling. When `publish.py` publishes a site that has a
+`github` key and auto-deploy on (`"auto_deploy": true` in `site.json`, or the
+panel's per-service "Auto deploy" switch), `sites/autodeploy.py`:
+
+1. creates one core webhook record for the service through the panel API
+   (`POST /api/v1/git/webhooks`, source `github`, deploy on push, receiving at
+   `<panel.public_url>/api/v1/git/webhooks/receive/<token>`);
+2. registers it on the GitHub repository with your existing credentials: the
+   `gh` token if `gh auth login` was done, otherwise the git credential helper.
+   Nothing is stored on the server. If neither exists it prints the exact
+   Payload URL, content type, secret and event to paste once at
+   `github.com/<repo>/settings/hooks/new` (the secret is shown only at creation).
+
+The panel builds from the local mirror, so the webhook's pre-deploy script runs
+`sync.py --refresh <site>` on Windows (WSL interop): it fetches GitHub with the
+Windows git credentials, refreshes the mirror and the Dockerfile overlay, then
+the panel pulls and redeploys. The same script refuses (and the panel logs a
+failed deployment) when the service's "Auto deploy" switch is off.
+
+Requirements: `panel.public_url` must reach the panel from the internet (for
+example `panel.<domain>` routed through the tunnel; restrict it to
+`/api/v1/git/webhooks/receive/*` with a Cloudflare WAF rule or Access policy if
+you do not want the login page exposed), and the Windows Python must be able to
+reach the saved panel session. Handy: `sites/<site>/site.json` needs
+`"github": "owner/repo"`.
+
+`"auto_deploy_mode": "poll"` keeps the old behaviour: `ServerKit.bat sync-on`
+registers the 3-minute task that runs `sync.py`. In `webhook` mode `sync-on`
+explains this and does nothing, and `sync.py` without `--now` exits at once.
+
+## Public addresses and the wildcard tunnel
+
+One named Cloudflare Tunnel carries every hostname. Two ways to use it:
+
+- per site (default, `"tunnel.wildcard": false`): `publish.py` adds a proxied
+  DNS record and an ingress rule for `<site>.<domain>` straight to the site's
+  port (`domain-tunnel.sh add|remove`);
+- wildcard (`"tunnel.wildcard": true`): run once, as root in the distro,
+  `serverkit-domain-tunnel wildcard <domain> <tunnel>` (also done by
+  `ServerKit.bat gateway-on`). It writes one ingress rule `*.<domain>` ->
+  local nginx (port 80) and one wildcard DNS CNAME. After that publishing adds
+  no DNS record and no ingress rule; nginx selects the site by its Host header
+  through the panel's domain record. `domain-tunnel.sh wildcard-off <domain>`
+  removes the rule (the DNS record stays). Specific hostnames added with `add`
+  (the gateway host) keep priority over the wildcard. Behind nginx the site is
+  served over plain http from the tunnel's point of view: the panel domain is
+  not switched to SSL (a redirect would loop), so an app that needs to know it
+  is on https should trust the `X-Forwarded-Proto` header Cloudflare sends.
+
 ## Remote link
 
 `ServerKit.bat remote-on` opens the panel to the internet through a Cloudflare
@@ -89,14 +172,28 @@ fixed upstream.
 ## Publish gateway & MCP (`gateway/`)
 
 Lets an AI that is not on this PC publish a project to
-`https://<name>.tadadigital.shop`. The gateway (`gateway/gateway.py`, systemd
+`https://<name>.<domain>`. The gateway (`gateway/gateway.py`, systemd
 unit `serverkit-gateway` in the distro, 127.0.0.1:8711) sits behind the tunnel
 and offers two front doors with the same bearer key:
 
 - REST: `GET /` (instructions, no key), `GET /v1/sites`, `POST /v1/publish`,
   `GET /v1/jobs/<id>`.
-- MCP (Streamable HTTP, plain JSON): `https://deploy.tadadigital.shop/mcp`,
-  tools `get_instructions`, `list_sites`, `publish_site`, `get_job`.
+- MCP (Streamable HTTP, plain JSON): `https://<gateway_label>.<domain>/mcp`
+  (and `/mcp/<key>` for clients that cannot send headers), 17 tools (below).
+
+### Gateway modes (`gateway.mode`)
+
+- `local` (default): the gateway answers MCP itself with its 17 tools and one
+  shared key (`/etc/serverkit-gateway/token`). Nothing changes for existing users.
+- `core`: `POST /mcp` and `POST /mcp/<key>` are reverse-proxied unchanged to the
+  panel's own per-user MCP endpoint, `http://127.0.0.1:<panel.port>/api/v1/mcp`
+  and `/api/v1/mcp/k/<key>`. The client's key (bearer header or path) goes
+  through as is and must be a panel API key, so tools, quotas and tenancy are
+  the panel's; status codes and JSON bodies come back untouched; keys are
+  masked in the access log; repeated 401/403 count toward the same bad-key
+  lockout. The REST endpoints (`/`, `/v1/...`) stay local in both modes.
+  Switch with `gateway.mode`, then `ServerKit.bat gateway-on` (restarts the unit).
+  `gateway-prompt` then writes a placeholder instead of the shared key.
 
 Owner commands:
 
@@ -116,12 +213,12 @@ under `/api/v1/remote-publish`).
 
 Safety limits (enforced by the gateway):
 
-- only `hasaca-bot/*` repositories;
-- only `<name>.tadadigital.shop` addresses;
+- only repositories of the `github.owners` in the config;
+- only `<name>.<domain>` addresses;
 - only new sites, or sites the gateway created (`origin: gateway` in `site.json`);
 - no delete;
 - one job at a time;
-- 10 bad keys per IP per 10 minutes -> HTTP 429;
+- `limits.bad_key_limit` bad keys per IP per `limits.bad_key_window_minutes` -> HTTP 429;
 - request body up to 256 KB.
 
 ### Tools added 2026-10-16 (verified end to end)
@@ -135,18 +232,19 @@ The gateway now has 17 MCP tools: `get_instructions`, `list_sites`, `publish_sit
 - `run_command` and `add_cron` run only inside the site's own container (docker exec); argv words limited to `A-Z a-z 0-9 _ . / : = @ , + % -` (no spaces, quotes or shell characters); at most 10 cron jobs per site, not more often than every 5 minutes.
 - `stop_site` / `start_site` use the panel's sleep/wake.
 - `delete_site` needs confirm text `DELETE <site>` and removes everything: databases, cron jobs, containers, volumes, images, panel service, tunnel hostname, local mirror and recipe. The "no delete" safety limit above applies to `publish_site` only; `delete_site` is the exception.
-- Limits: 30 authenticated requests per minute per IP; 10 bad keys per IP per 10 minutes -> HTTP 429.
+- Limits (all from `limits.*` in the config; defaults shown): 30 authenticated requests per minute per IP; 10 bad keys per IP per 10 minutes -> HTTP 429; 2 databases and 10 cron jobs (not more often than every 5 minutes) per site.
 - Code: `gateway/gateway.py` (runs in the distro, MCP/REST), `gateway/remote_ops.py` (Windows-side worker), `gateway/netlink.sh` (installed as `/usr/local/sbin/serverkit-netlink`).
 
 ## Automatic brain notes (`brain/`)
 
-`brain/note.py` keeps the HASACA-beyin vault current without anyone asking:
+`brain/note.py` keeps your notes vault (`brain.vault` in the config; notes go to
+`brain.notes_dir`) current without anyone asking:
 it collects what changed in this setup since its last run (files under
 `windows/`, the remote-publish extension and the serverkit skill, new
 auto-deploy log lines, remote publishes through the gateway, services added
 or changed in the panel) and, only when something changed, runs a Haiku agent
 (`claude -p --model haiku`) in the vault that adds the facts to
-`10_PROJELER/serverkit-windows/CURRENT-STATE.md` and the day's log, commits
+`<notes_dir>/CURRENT-STATE.md` and the day's log, commits
 and pushes those files. Secrets are masked before anything leaves the script.
 It runs from the Claude Code Stop hook `~/.claude/hooks/serverkit-note.sh`
 (every session, in the background) and from the scheduled task
