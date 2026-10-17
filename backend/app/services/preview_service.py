@@ -268,6 +268,13 @@ class PreviewService:
 
             preview = ApplicationPreview.query.filter_by(
                 application_id=app.id, pr_number=pr_number).first()
+            # "[skip preview]" / "[preview skip]" in the PR title: never create.
+            # A preview that already exists keeps following its PR.
+            from app.services.deploy_control_service import has_skip_preview_marker
+            if (preview is None or preview.deleted_at is not None
+                    or preview.status == ApplicationPreview.STATUS_DESTROYED) \
+                    and has_skip_preview_marker(pr_title):
+                return {'skipped': True, 'reason': 'skip_preview_marker'}
             if not preview:
                 preview = ApplicationPreview(application_id=app.id, pr_number=pr_number)
                 db.session.add(preview)

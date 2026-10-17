@@ -1343,6 +1343,17 @@ def update_app(app_id):
         _, error = deploy_settings.validate(data['deploy_settings'])
         if error:
             raise ValidationError(error)
+    clean_filter = clean_root_dir = None
+    if 'build_filter' in data:
+        from app.services import deploy_control_service
+        clean_filter, error = deploy_control_service.validate_build_filter(data['build_filter'])
+        if error:
+            raise ValidationError(error)
+    if 'root_dir' in data:
+        from app.services import deploy_control_service
+        clean_root_dir, error = deploy_control_service.validate_root_dir(data['root_dir'])
+        if error:
+            raise ValidationError(error)
 
     if 'name' in data:
         app.name = data['name']
@@ -1362,6 +1373,10 @@ def update_app(app_id):
         deploy_settings.update(app, data['deploy_settings'])
     if 'root_path' in data:
         app.root_path = data['root_path']
+    if 'build_filter' in data:
+        app.build_filter = json.dumps(clean_filter) if clean_filter else None
+    if 'root_dir' in data:
+        app.root_dir = clean_root_dir
     if 'docker_image' in data:
         app.docker_image = data['docker_image']
     if 'registry_id' in data:

@@ -129,6 +129,14 @@ MANIFEST_SCHEMA: Dict[str, Any] = {
                 "buildCommand": {"type": "string"},
                 "startCommand": {"type": "string"},
                 "dockerfilePath": {"type": "string", "minLength": 1},
+                "rootDir": {"type": "string"},
+                "buildFilter": {
+                    "type": "object",
+                    "properties": {
+                        "paths": {"type": "array", "items": {"type": "string"}},
+                        "ignoredPaths": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
                 "port": {"type": "integer", "minimum": 1, "maximum": 65535},
                 "ports": {"type": "array", "items": {"$ref": "#/definitions/portDecl"}},
                 "image": {"type": "string"},
@@ -645,10 +653,22 @@ class ManifestSpecService:
                 errors.append(f'{prefix}: `dockerfilePath` must be a relative path inside the '
                               'repository (no leading `/`, no `..`)')
 
+        # Monorepo auto-deploy controls (Render's rootDir / buildFilter).
+        from app.services.deploy_control_service import validate_build_filter, validate_root_dir
+        root_dir, root_err = validate_root_dir(cls._alias(svc, 'rootDir', 'root_dir'))
+        if root_err:
+            errors.append(f'{prefix}: `rootDir` must be a relative path inside the repository')
+        raw_filter = cls._alias(svc, 'buildFilter', 'build_filter')
+        build_filter, filter_err = validate_build_filter(raw_filter)
+        if filter_err:
+            errors.append(f'{prefix}: `buildFilter` is invalid ({filter_err})')
+
         return {
             'name': name,
             'type': stype,
             'kind': kind,
+            'root_dir': root_dir,
+            'build_filter': build_filter,
             'app_type': APP_TYPE_MAP.get(stype) if kind == 'app' else None,
             'db_engine': DB_ENGINE_MAP.get(stype) if kind == 'database' else None,
             'runtime': svc.get('runtime'),

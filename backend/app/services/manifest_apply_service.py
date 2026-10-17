@@ -129,6 +129,8 @@ class ManifestApplyService:
             'build_command': svc.get('build_command'),
             'start_command': svc.get('start_command'),
             'dockerfile_path': svc.get('dockerfile_path'),
+            'root_dir': svc.get('root_dir'),
+            'build_filter': svc.get('build_filter'),
             'cpu': cls._stringify(svc.get('cpu')),
             'memory': cls._stringify(svc.get('memory')),
             'auto_deploy': svc.get('auto_deploy', False),
@@ -200,6 +202,12 @@ class ManifestApplyService:
         if resolved.get('healthcheck_path'):
             expected['healthcheck_path'] = resolved['healthcheck_path']
             observed['healthcheck_path'] = app.healthcheck_path
+        if resolved.get('root_dir'):
+            expected['root_dir'] = resolved['root_dir']
+            observed['root_dir'] = app.root_dir
+        if resolved.get('build_filter'):
+            expected['build_filter'] = resolved['build_filter']
+            observed['build_filter'] = app._build_filter_dict()
 
         # Appliance tier: track raw ports + BYO image.
         declared_ports = resolved.get('ports') or []
@@ -333,6 +341,8 @@ class ManifestApplyService:
                        ('app_type', 'port', 'healthcheck_path', 'runtime',
                         'build_command', 'start_command', 'cpu', 'memory')}
             payload['name'] = name
+            payload['root_dir'] = resolved.get('root_dir')
+            payload['build_filter'] = resolved.get('build_filter')
             # BYO image: stamp the declared image + private registry
             if resolved.get('image'):
                 payload['image'] = resolved['image']
@@ -944,6 +954,8 @@ class ManifestApplyService:
             memory_limit=payload.get('memory'),
             docker_image=payload.get('image'),
             registry_id=payload.get('registry_id'),
+            root_dir=payload.get('root_dir'),
+            build_filter=json.dumps(payload['build_filter']) if payload.get('build_filter') else None,
             buildpack_overrides=json.dumps(overrides) if overrides else None,
             source='manifest',
             user_id=user_id,
@@ -1012,6 +1024,10 @@ class ManifestApplyService:
             app.port = changes['port']
         if 'healthcheck_path' in changes:
             app.healthcheck_path = changes['healthcheck_path']
+        if 'root_dir' in changes:
+            app.root_dir = changes['root_dir']
+        if 'build_filter' in changes:
+            app.build_filter = json.dumps(changes['build_filter']) if changes['build_filter'] else None
         if 'cpu' in changes:
             app.cpu_limit = changes['cpu']
         if 'memory' in changes:
@@ -1234,6 +1250,10 @@ class ManifestApplyService:
             changes['port'] = resolved['port']
         if resolved.get('healthcheck_path') and app.healthcheck_path != resolved['healthcheck_path']:
             changes['healthcheck_path'] = resolved['healthcheck_path']
+        if resolved.get('root_dir') and app.root_dir != resolved['root_dir']:
+            changes['root_dir'] = resolved['root_dir']
+        if resolved.get('build_filter') and app._build_filter_dict() != resolved['build_filter']:
+            changes['build_filter'] = resolved['build_filter']
         if resolved.get('cpu') and app.cpu_limit != resolved['cpu']:
             changes['cpu'] = resolved['cpu']
         if resolved.get('memory') and app.memory_limit != resolved['memory']:

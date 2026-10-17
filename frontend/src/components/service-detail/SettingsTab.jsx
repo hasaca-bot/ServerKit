@@ -29,6 +29,7 @@ import VolumesPanel from '../apps/VolumesPanel';
 import ResourceLimitsPanel from '../apps/ResourceLimitsPanel';
 import MicroCachePanel from '../apps/MicroCachePanel';
 import DeploySafetyPanel from '../apps/DeploySafetyPanel';
+import BuildFilterPanel from '../apps/BuildFilterPanel';
 import SlotDeploysPanel from '../apps/SlotDeploysPanel';
 import AppWafPanel from '../apps/AppWafPanel';
 import BuildTab from '../appdetail/BuildTab';
@@ -397,6 +398,7 @@ where a new release is asked, and for how long. */}
                         {deployConfig && (
                             <div className="svc-settings__subsection">
                                 <h4 className="svc-settings__subsection-title">{t('app.settingsTab.deployment', 'Deployment')}</h4>
+                                <BuildFilterPanel app={app} onChanged={onUpdate} />
                                 <DeployTab embedded appId={app.id} appPath={app.path} />
                             </div>
                         )}

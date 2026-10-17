@@ -182,6 +182,13 @@ def receive_pull_request(token):
         return jsonify({'success': True, 'action': 'ignored',
                         'reason': f"unhandled PR action ({pr.get('action')})"}), 200
 
+    if job_kind == 'preview.create':
+        from app.services.deploy_control_service import has_skip_preview_marker
+        if has_skip_preview_marker(pr.get('pr_title')):
+            return jsonify({'success': True, 'action': 'skipped',
+                            'reason': 'PR title contains a skip marker ([skip preview])',
+                            'pr_number': pr.get('pr_number')}), 200
+
     payload = {'application_id': webhook.app_id, 'pr': {
         'pr_number': pr.get('pr_number'),
         'branch': pr.get('branch'),

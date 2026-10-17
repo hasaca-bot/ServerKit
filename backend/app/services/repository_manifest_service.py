@@ -355,6 +355,8 @@ class RepositoryManifestService:
             custom_build_cmd=service.get('buildCommand'),
             custom_start_cmd=service.get('startCommand'),
             healthcheck_path=service.get('healthCheckPath') or service.get('healthcheckPath'),
+            root_dir=service.get('rootDir') or service.get('root_dir'),
+            build_filter=cls._render_build_filter(service.get('buildFilter')),
         )
         if port:
             cls._append_port(result, port)
@@ -365,6 +367,13 @@ class RepositoryManifestService:
         if runtime:
             summary = f'{summary} using {runtime}'
         cls._add_manifest(result, 'render', file_name, 'Render blueprint', summary)
+
+    @staticmethod
+    def _render_build_filter(raw: Any) -> Optional[Dict]:
+        """render.yaml ``buildFilter: {paths, ignoredPaths}`` -> our shape."""
+        from app.services.deploy_control_service import validate_build_filter
+        clean, _error = validate_build_filter(raw)
+        return clean
 
     @classmethod
     def _detect_railway(cls, file_map: Dict[str, str], result: Dict) -> None:
