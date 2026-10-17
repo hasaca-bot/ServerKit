@@ -72,6 +72,11 @@ SCOPES = [
     # Secrets
     {'key': 'secrets:read', 'label': 'Reveal secrets', 'group': 'Secrets',
      'description': 'Read unmasked secret values in API responses.'},
+
+    # MCP
+    {'key': 'mcp', 'label': 'MCP server', 'group': 'MCP',
+     'description': 'Use the MCP endpoint (/api/v1/mcp) for AI assistants. Tools act only '
+                    'on your own services; your role decides read-only or write.'},
 ]
 
 # Set of valid catalog keys (excludes the implicit full-access scope).

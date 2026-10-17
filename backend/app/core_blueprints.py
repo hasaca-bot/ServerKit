@@ -288,6 +288,7 @@ CORE_BLUEPRINTS: tuple[BlueprintSpec, ...] = (
         'test_sandbox_bp',
         '/api/v1/test-sandbox',
     ),
+    BlueprintSpec('app.api.mcp', 'mcp_bp', '/api/v1/mcp'),
 )
 
 
