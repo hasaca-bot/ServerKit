@@ -713,8 +713,15 @@ def revoke_app_access(app_id, grant_id):
 @apps_bp.route('/from-repository', methods=['POST'])
 @jwt_required()
 def create_app_from_repository():
-    """Create a new application by cloning a Git repository."""
-    user = require_admin_user()
+    """Create a new application by cloning a Git repository.
+
+    Developers may deploy repositories reachable through their OWN source
+    connection (tenant isolation); raw git URLs and host-executed build
+    commands stay admin-only. Counts against the caller's plan.
+    """
+    user = get_current_user()
+    if not user or not user.is_developer:
+        raise PermissionDeniedError('Developer access required')
 
     data = json_object()
     name = _service_slug(data.get('name'))
@@ -737,23 +744,20 @@ def create_app_from_repository():
 
     if not name or len(name) < 2:
         return jsonify({'error': 'Service name must be at least 2 characters'}), 400
-    if source_connection_id:
-        try:
-            source_repo = SourceConnectionService.get_authenticated_clone_url(
-                user_id=user.id,
-                connection_id=int(source_connection_id),
-                full_name=repository_full_name,
-            )
-            clone_repo_url = source_repo['clone_url']
-            deploy_repo_url = source_repo['public_url']
-        except (TypeError, ValueError) as exc:
-            return jsonify({'error': str(exc)}), 400
-    else:
-        clone_repo_url = repo_url
-        deploy_repo_url = repo_url
-
-    if not clone_repo_url:
+    if not user.is_admin:
+        # Custom build/start commands run on the host, not in a container.
+        if build_method == 'custom' or custom_build_cmd or custom_start_cmd:
+            raise PermissionDeniedError('Only an administrator can set custom build or start commands')
+    from app.services.plan_quota_service import PlanQuotaService
+    PlanQuotaService.check(user, 'apps')
+    from app.services.repository_access_service import resolve_clone_source
+    if not source_connection_id and not repo_url and user.is_admin:
         raise field_required('repo_url')
+    source_repo = resolve_clone_source(
+        user, source_connection_id=source_connection_id,
+        repository_full_name=repository_full_name, repo_url=repo_url)
+    clone_repo_url = source_repo['clone_url']
+    deploy_repo_url = source_repo['public_url']
 
     valid_app_types = ['auto', 'docker', 'flask', 'django', 'php', 'static']
     if app_type not in valid_app_types:
@@ -820,6 +824,11 @@ def create_app_from_repository():
     dockerfile_path = dockerfile_path or recommended.get('dockerfile_path') or 'Dockerfile'
     custom_build_cmd = custom_build_cmd or recommended.get('custom_build_cmd')
     custom_start_cmd = custom_start_cmd or recommended.get('custom_start_cmd')
+    if not user.is_admin:
+        # A repository's manifest may not smuggle in host-executed commands.
+        custom_build_cmd = custom_start_cmd = None
+        if resolved_build_method == 'custom':
+            resolved_build_method = 'auto'
 
     # When the build method routes through the build-pack layer, persist the
     # (possibly overridden) plan on the Application so the generated Dockerfile is
@@ -848,7 +857,9 @@ def create_app_from_repository():
     # contains used to start the web container without its database. An
     # explicit non-compose choice from the caller still wins.
     compose_file = None
-    if (manifest_strategy == 'docker_compose' and app_type in ('auto', 'docker')
+    # Compose projects can mount host paths / run privileged: admin-only.
+    if (user.is_admin and manifest_strategy == 'docker_compose'
+            and app_type in ('auto', 'docker')
             and build_method in ('auto', 'dockerfile')):
         compose_file = next((m.get('file') for m in manifest.get('manifests') or []
                              if m.get('type') == 'docker_compose'), None)
@@ -886,6 +897,7 @@ def create_app_from_repository():
                 'buildpack_overrides': buildpack_overrides,
             },
         )
+        PlanQuotaService.apply_plan_to_new_app(user, app)
 
         return jsonify({
             'message': 'Repository service created',
