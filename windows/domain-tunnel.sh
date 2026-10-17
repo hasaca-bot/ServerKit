@@ -12,17 +12,39 @@
 # cloudflared's X-Forwarded-Proto: https. Port 80 means "through nginx" (the
 # panel, or anything routed by Host there).
 #
+# Wildcard mode: `wildcard <domain>` routes *.<domain> to local nginx (port 80)
+# once - one ingress rule plus one wildcard DNS CNAME - so publishing a site
+# needs no per-site DNS record or ingress rule any more; nginx picks the site by
+# its Host header (the panel's domain record). Specific hostnames added with
+# `add` keep priority (they are written before the wildcard). The free
+# Cloudflare certificate covers one subdomain level: <site>.<domain>.
+#
 # Usage (as root inside the distro):
 #   domain-tunnel.sh up <name> <hostname>=<port> [<hostname>=<port> ...]
 #       Replaces the tunnel's whole hostname list with the given one.
 #   domain-tunnel.sh add <name> <hostname>=<port>   (keeps the others)
+#   domain-tunnel.sh remove <name> <hostname>
+#   domain-tunnel.sh wildcard <domain> [<name>]     (name defaults to $SERVERKIT_TUNNEL)
+#   domain-tunnel.sh wildcard-off <domain> [<name>] (removes the rule; the DNS record stays)
 #   domain-tunnel.sh status <name>
 #   domain-tunnel.sh down <name>          (stops it; DNS records stay)
+#
+# SERVERKIT_TUNNEL_SKIP_DNS=1 writes the ingress rules but creates no DNS
+# records (used when a wildcard record already covers the hostname).
 
 set -euo pipefail
 
-cmd="${1:-}"; name="${2:-}"
-[ -n "$cmd" ] && [ -n "$name" ] || { echo "usage: $0 up|add|status|down <name> ..." >&2; exit 2; }
+usage() { echo "usage: $0 up|add|remove|status|down <name> ... | wildcard|wildcard-off <domain> [<name>]" >&2; exit 2; }
+
+cmd="${1:-}"; domain=""
+case "$cmd" in
+    wildcard|wildcard-off)
+        domain="${2:-}"; name="${3:-${SERVERKIT_TUNNEL:-}}"
+        case "$domain" in ''|.*|*.|*..*|*[!a-z0-9.-]*) echo "invalid domain: $domain" >&2; exit 2 ;; esac
+        [ -n "$name" ] || { echo "tunnel name required (third argument or \$SERVERKIT_TUNNEL)" >&2; exit 2; } ;;
+    *) name="${2:-}" ;;
+esac
+[ -n "$cmd" ] && [ -n "$name" ] || usage
 case "$name" in *[!a-z0-9-]*) echo "invalid name: $name" >&2; exit 2 ;; esac
 
 DIR=/etc/cloudflared
@@ -40,10 +62,11 @@ for t in json.load(sys.stdin) or []:
 up() {
     [ "$#" -gt 0 ] || { echo "at least one hostname=port required" >&2; exit 2; }
     [ -f /root/.cloudflared/cert.pem ] || { echo "run 'cloudflared tunnel login' first" >&2; exit 1; }
-    local pair host port
+    local pair host port pass
     for pair in "$@"; do
         host="${pair%%=*}"; port="${pair#*=}"
-        case "$host" in ''|*[!a-z0-9.-]*) echo "invalid hostname: $host" >&2; exit 2 ;; esac
+        # a leading "*." marks a wildcard hostname (*.example.com)
+        case "${host#\*.}" in ''|*[!a-z0-9.-]*) echo "invalid hostname: $host" >&2; exit 2 ;; esac
         case "$port" in ''|*[!0-9]*) echo "invalid port for $host: $port" >&2; exit 2 ;; esac
     done
     mkdir -p "$DIR"
@@ -62,18 +85,27 @@ up() {
         echo "tunnel: $id"
         echo "credentials-file: $creds"
         echo "ingress:"
-        for pair in "$@"; do
-            echo "  - hostname: ${pair%%=*}"
-            echo "    service: http://127.0.0.1:${pair#*=}"
+        # Specific hostnames first, wildcards after them: cloudflared uses the first match.
+        for pass in specific wildcard; do
+            for pair in "$@"; do
+                case "${pair%%=*}" in
+                    \*.*) [ "$pass" = wildcard ] || continue ;;
+                    *)     [ "$pass" = specific ] || continue ;;
+                esac
+                echo "  - hostname: \"${pair%%=*}\""
+                echo "    service: http://127.0.0.1:${pair#*=}"
+            done
         done
         echo "  - service: http_status:404"
     } > "$tmp"
     cloudflared tunnel ingress validate --config "$tmp" >/dev/null
     mv "$tmp" "$CONF"
 
-    for pair in "$@"; do
-        cloudflared tunnel route dns --overwrite-dns "$id" "${pair%%=*}" 2>&1 | grep -o 'Added CNAME.*tunnel\|already configured.*' || true
-    done
+    if [ "${SERVERKIT_TUNNEL_SKIP_DNS:-}" != 1 ]; then
+        for pair in "$@"; do
+            cloudflared tunnel route dns --overwrite-dns "$id" "${pair%%=*}" 2>&1 | grep -o 'Added CNAME.*tunnel\|already configured.*' || true
+        done
+    fi
 
     cat > "/etc/systemd/system/$UNIT.service" <<EOF
 [Unit]
@@ -106,7 +138,7 @@ add() {
 import re, sys
 host = None
 for line in open(sys.argv[1]):
-    m = re.match(r'\s*- hostname:\s*(\S+)', line)
+    m = re.match(r'\s*- hostname:\s*"?([^"\s]+)"?', line)
     if m:
         host = m.group(1); continue
     m = re.match(r'\s*service:\s*http://127\.0\.0\.1:(\d+)', line)
@@ -128,7 +160,7 @@ remove() {
 import re, sys
 host = None
 for line in open(sys.argv[1]):
-    m = re.match(r'\s*- hostname:\s*(\S+)', line)
+    m = re.match(r'\s*- hostname:\s*"?([^"\s]+)"?', line)
     if m:
         host = m.group(1); continue
     m = re.match(r'\s*service:\s*http://127\.0\.0\.1:(\d+)', line)
@@ -140,10 +172,12 @@ EOF
 }
 
 case "$cmd" in
+    wildcard)     add "*.$domain=80" ;;
+    wildcard-off) remove "*.$domain" ;;
     up)     shift 2; up "$@" ;;
     add)    shift 2; add "$@" ;;
     remove) shift 2; remove "$@" ;;
     status) systemctl is-active "$UNIT" || true; grep -E 'hostname|service' "$CONF" 2>/dev/null || true ;;
     down)   systemctl disable --now "$UNIT" >/dev/null 2>&1 || true; echo "stopped $UNIT" ;;
-    *) echo "usage: $0 up|add|status|down <name> ..." >&2; exit 2 ;;
+    *) usage ;;
 esac
