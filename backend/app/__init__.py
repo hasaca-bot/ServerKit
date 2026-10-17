@@ -444,6 +444,8 @@ def create_app(config_name=None):
             DeploymentJobService.register_jobs()
             from app.services.recipe_execution_service import RecipeExecutionService
             RecipeExecutionService.register_jobs()
+            from app.services.mcp.jobs import register_jobs as register_mcp_jobs
+            register_mcp_jobs()
             # WorkflowEngine.register_jobs() removed (engine retired).
             from app.services.backup_service import BackupService
             BackupService.register_jobs()
