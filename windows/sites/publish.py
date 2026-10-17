@@ -21,8 +21,16 @@ site.json:
     health     path that must answer 200 once deployed
     source     optional: Windows path of a git working copy on this PC; the
                mirror is refreshed from its committed branches first
-    public_host  optional: public hostname (e.g. foo.tadadigital.shop) routed
-               through the Cloudflare tunnel straight to `port`
+    public_host  optional: public hostname (e.g. foo.<your-domain>) routed
+               through the Cloudflare tunnel straight to `port` (or, with
+               "tunnel.wildcard" in the config, through nginx by Host header)
+    github     optional: "owner/repo"; needed for auto-deploy
+    auto_deploy  optional true/false: register the panel's core GitHub webhook
+               (config "auto_deploy_mode": "webhook") for this site; when
+               omitted, the panel's per-service "Auto deploy" switch decides
+
+All owner-specific values (domain, tunnel, paths ...) come from
+windows/serverkit-windows.json, see swk_config.py.
 """
 import base64
 import datetime
@@ -37,10 +45,14 @@ import urllib.error
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SKCTL = os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'serverkit', 'skctl.py')
-DISTRO = os.environ.get('SERVERKIT_WSL_DISTRO', 'ServerKit')
-# The one named Cloudflare tunnel that carries every *.tadadigital.shop name.
-TUNNEL = os.environ.get('SERVERKIT_TUNNEL', 'tada')
+sys.path.insert(0, os.path.dirname(HERE))
+import swk_config  # noqa: E402
+
+CFG = swk_config.load()
+SKCTL = CFG.skctl
+DISTRO = CFG.distro
+# The one named Cloudflare tunnel that carries every <name>.<domain> address.
+TUNNEL = CFG.tunnel
 
 _spec = importlib.util.spec_from_file_location('skctl', SKCTL)
 skctl = importlib.util.module_from_spec(_spec)
@@ -65,6 +77,15 @@ def must(method, path, body=None):
 def wsl_path(windows_path):
     full = os.path.abspath(windows_path)
     return '/mnt/' + full[0].lower() + full[2:].replace('\\', '/')
+
+
+def apply_overlay(site, site_dir):
+    """Rebuild the local-only "serverkit" branch of the site's mirror (the
+    Dockerfile overlay on top of the upstream branch)."""
+    subprocess.check_call([
+        'wsl.exe', '-d', DISTRO, '-u', 'root', '--exec', 'bash',
+        wsl_path(os.path.join(HERE, 'overlay.sh')), site.get('mirror', site['name']), site['upstream'], wsl_path(site_dir),
+    ])
 
 
 def generate(kind):
@@ -107,6 +128,13 @@ def wait_for_deploy(app_id, since, timeout=1800):
     sys.exit('deployment did not finish in time')
 
 
+def _load_autodeploy():
+    spec = importlib.util.spec_from_file_location('autodeploy', os.path.join(HERE, 'autodeploy.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def main():
     site_dir = os.path.abspath(sys.argv[1])
     with open(os.path.join(site_dir, 'site.json'), 'r', encoding='utf-8') as f:
@@ -130,10 +158,7 @@ def main():
         ])
 
     # 1. Overlay branch in the local mirror.
-    subprocess.check_call([
-        'wsl.exe', '-d', DISTRO, '-u', 'root', '--exec', 'bash',
-        wsl_path(os.path.join(HERE, 'overlay.sh')), mirror, site['upstream'], wsl_path(site_dir),
-    ])
+    apply_overlay(site, site_dir)
 
     # 2. Service.
     app = find_app(name)
@@ -187,25 +212,44 @@ def main():
     # 5b. Public address under the Cloudflare tunnel: route the hostname to
     #     the container port, and record it in the panel as the primary,
     #     HTTPS domain (Cloudflare serves the certificate).
+    #     With "tunnel.wildcard" the tunnel already sends *.<domain> to nginx
+    #     (domain-tunnel.sh wildcard), so there is no per-site DNS record or
+    #     ingress rule: the panel domain (nginx vhost) is all that is needed,
+    #     and it stays plain http behind Cloudflare (a redirect to https there
+    #     would loop).
     public = site.get('public_host')
     if public:
-        subprocess.check_call([
-            'wsl.exe', '-d', DISTRO, '-u', 'root', '--exec',
-            '/usr/local/sbin/serverkit-domain-tunnel', 'add', TUNNEL, f'{public}={site["port"]}',
-        ], stdout=subprocess.DEVNULL)
+        if not CFG.wildcard:
+            subprocess.check_call([
+                'wsl.exe', '-d', DISTRO, '-u', 'root', '--exec',
+                '/usr/local/sbin/serverkit-domain-tunnel', 'add', TUNNEL, f'{public}={site["port"]}',
+            ], stdout=subprocess.DEVNULL)
         rows = (must('GET', f'/apps/{app_id}').get('app') or {}).get('domains', [])
         row = next((d for d in rows if d['name'] == public), None)
         if row is None:
             row = must('POST', '/domains', {'name': public, 'application_id': app_id, 'is_primary': True})['domain']
-        if not row.get('ssl_enabled') or not row.get('is_primary'):
-            must('PUT', f'/domains/{row["id"]}', {'ssl_enabled': True, 'is_primary': True})
-        print(f'   public address https://{public}')
+        want_ssl = not CFG.wildcard
+        if (want_ssl and not row.get('ssl_enabled')) or not row.get('is_primary'):
+            body = {'is_primary': True}
+            if want_ssl:
+                body['ssl_enabled'] = True
+            must('PUT', f'/domains/{row["id"]}', body)
+        print(f'   public address https://{public}' + (' (wildcard tunnel, no per-site DNS)' if CFG.wildcard else ''))
 
     # 6. Redeploy so the variables and volumes reach the container.
     must('POST', f'/deploy/apps/{app_id}/deploy', {})
     time.sleep(3)
     app = wait_for_deploy(app_id, started)
     print(f'   status: {app.get("status")}')
+
+    # 6b. Auto-deploy: the panel's core GitHub webhook (default), or nothing
+    #     here when "auto_deploy_mode" is "poll" (sync.py does the checking).
+    if site.get('github') and CFG.auto_deploy_mode == 'webhook':
+        try:
+            autodeploy = _load_autodeploy()
+            autodeploy.ensure(sys.modules[__name__], CFG, site, app_id)
+        except (Exception, SystemExit) as e:  # the site is live; a webhook problem must not fail the publish
+            print(f'   auto-deploy webhook NOT set up: {e}')
 
     # 7. Health: through nginx by hostname, or straight on the published port.
     path = site.get('health', '/')

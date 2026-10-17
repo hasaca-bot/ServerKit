@@ -30,15 +30,18 @@ import time
 import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+import swk_config  # noqa: E402
+
+CFG = swk_config.load()
 SITES = os.path.join(os.path.dirname(HERE), 'sites')
-DOMAIN = 'tadadigital.shop'
+DOMAIN = CFG.domain
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 NETLINK = '/usr/local/sbin/serverkit-netlink'
 TUNNEL_SCRIPT = '/usr/local/sbin/serverkit-domain-tunnel'
 
 NAME_RE = re.compile(r'^[a-z][a-z0-9-]{1,30}[a-z0-9]$')
-RESERVED = {'www', 'panel', 'deploy', 'api', 'admin', 'mail', 'smtp', 'ftp', 'root',
-            'tada', 'app', 'status', 'cdn', 'static', 'ns1', 'ns2'}
+RESERVED = CFG.reserved
 KEY_RE = re.compile(r'^[A-Z][A-Z0-9_]{0,63}$')
 TOKEN_RE = re.compile(r'^[A-Za-z0-9_./:=@,+%-]{1,200}$')
 CRON_TOKEN_RE = re.compile(r'^[A-Za-z0-9_./:=@,+-]{1,200}$')  # no "%": cron turns it into a newline
@@ -57,7 +60,8 @@ ENGINES = {
     'mariadb': ('DATABASE_URL', 'mysql://root:{pw}@{host}:3306/app', 'app'),
     'redis': ('REDIS_URL', 'redis://:{pw}@{host}:6379/0', None),
 }
-MAX_ENGINES, MAX_JOBS, MAX_ENV = 2, 10, 50
+MAX_ENGINES, MAX_JOBS, MAX_ENV = CFG.limits['databases_per_site'], CFG.limits['cron_per_site'], 50
+MIN_CRON_INTERVAL = CFG.limits['cron_min_interval_minutes']
 
 sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
 
@@ -532,8 +536,8 @@ def check_schedule(schedule):
     expand(fields[3], 1, 12)
     expand(fields[4], 0, 7)
     gaps = [b - a for a, b in zip(minutes, minutes[1:])] + [minutes[0] + 60 - minutes[-1]]
-    if min(gaps) < 5:
-        raise Refuse('schedule: jobs may run at most once every 5 minutes')
+    if min(gaps) < MIN_CRON_INTERVAL:
+        raise Refuse(f'schedule: jobs may run at most once every {MIN_CRON_INTERVAL} minutes')
     return ' '.join(fields)
 
 
@@ -650,6 +654,13 @@ def a_delete_site(spec, site, recipe):
     if app is not None:
         app_id = app['id']
         say(f'deleting {site} (service {app_id})')
+        try:  # core GitHub webhook of the service (and the one registered on GitHub)
+            spec_ = importlib.util.spec_from_file_location('autodeploy', os.path.join(SITES, 'autodeploy.py'))
+            autodeploy = importlib.util.module_from_spec(spec_)
+            spec_.loader.exec_module(autodeploy)
+            autodeploy.remove(publish, CFG, site, app_id, repo=recipe.get('github'), say=say)
+        except (Exception, SystemExit) as e:
+            warnings.append(f'auto-deploy webhook not removed: {e}')
         for job in app_jobs(app_id):
             must('DELETE', f'/cron/jobs/{job["id"]}')
             say(f'   cron job {job["id"]} removed')
@@ -661,9 +672,12 @@ def a_delete_site(spec, site, recipe):
         say('   service deleted from the panel')
         netlink('remove', app_id, strict=False)
     public = recipe.get('public_host') or f'{site}.{DOMAIN}'
-    r = wsl(TUNNEL_SCRIPT, 'remove', publish.TUNNEL, public)
-    if r.returncode != 0:
-        warnings.append(f'tunnel hostname {public} not removed')
+    if CFG.wildcard:
+        say('   tunnel: wildcard mode, no per-site hostname to remove')
+    else:
+        r = wsl(TUNNEL_SCRIPT, 'remove', publish.TUNNEL, public)
+        if r.returncode != 0:
+            warnings.append(f'tunnel hostname {public} not removed')
     r = wsl('rm', '-rf', f'/srv/git/{site}.git')
     if r.returncode != 0:
         warnings.append('git mirror not removed')

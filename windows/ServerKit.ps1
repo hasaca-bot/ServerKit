@@ -45,8 +45,34 @@ $ErrorActionPreference = 'Continue'
 $env:WSL_UTF8 = '1'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$PanelUrl = 'http://localhost'
-$HealthUrl = 'http://localhost/api/v1/system/health'
+
+# Owner-specific values live in windows\serverkit-windows.json (copy of
+# serverkit-windows.example.json). install/start work without it; the gateway,
+# sync and remote-publish commands require it (Get-SwkConfig -Required).
+$ConfigFile = if ($env:SERVERKIT_WINDOWS_CONFIG) { $env:SERVERKIT_WINDOWS_CONFIG } else { Join-Path $PSScriptRoot 'serverkit-windows.json' }
+function Get-SwkConfig {
+    param([switch]$Required)
+    if (-not (Test-Path $ConfigFile)) {
+        if ($Required) {
+            Write-Host "  x Ayar dosyasi yok: $ConfigFile" -ForegroundColor Red
+            Write-Host '    windows\serverkit-windows.example.json dosyasini windows\serverkit-windows.json olarak kopyalayip kendi degerlerinizi yazin.' -ForegroundColor Yellow
+            exit 1
+        }
+        return $null
+    }
+    try { return (Get-Content -Raw -Encoding UTF8 $ConfigFile | ConvertFrom-Json) }
+    catch {
+        Write-Host "  x Ayar dosyasi okunamadi ($ConfigFile): $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+}
+$Cfg = Get-SwkConfig
+if ($Cfg) {
+    if (-not $PSBoundParameters.ContainsKey('Distro') -and $Cfg.wsl -and $Cfg.wsl.distro) { $Distro = $Cfg.wsl.distro }
+}
+$PanelBase = if ($Cfg -and $Cfg.panel -and $Cfg.panel.url) { ([string]$Cfg.panel.url).TrimEnd('/') } else { 'http://localhost' }
+$PanelUrl = $PanelBase
+$HealthUrl = "$PanelBase/api/v1/system/health"
 $KeepAliveArgs = "-d $Distro --exec /bin/sleep infinity"
 $StartupLink = Join-Path ([Environment]::GetFolderPath('Startup')) 'ServerKit.lnk'
 $WatchdogTask = 'ServerKit Watchdog'
@@ -318,9 +344,10 @@ function Invoke-Remote {
     }
 }
 
-# Auto-deploy from GitHub (windows/sites/sync.py): every 3 minutes, sites whose
-# panel service has "Auto deploy" switched on are republished when their
-# GitHub branch moved. The panel switch is the per-site on/off.
+# Auto-deploy fallback (windows/sites/sync.py): default auto_deploy_mode is
+# "webhook" (the panel's own GitHub webhook, registered by publish.py), which
+# needs no scheduled task. With auto_deploy_mode "poll" this task checks GitHub
+# every 3 minutes and republishes sites whose panel "Auto deploy" switch is on.
 function Set-SiteSync {
     param([bool]$Enable)
     if (-not $Enable) {
@@ -328,8 +355,16 @@ function Set-SiteSync {
         Write-Good 'GitHub otomatik yayin kontrolu kapatildi.'
         return
     }
-    $python = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
-    if (-not $python) { Stop-WithError 'python.exe bulunamadi.' }
+    $conf = Get-SwkConfig -Required
+    if ($conf.auto_deploy_mode -ne 'poll') {
+        Write-Warn 'auto_deploy_mode "webhook": otomatik yayin panelin kendi GitHub webhook ile calisir, zamanlanmis gorev gerekmez.'
+        Write-Warn 'Eski 3 dakikalik kontrolu istiyorsaniz serverkit-windows.json icinde "auto_deploy_mode": "poll" yapip tekrar deneyin.'
+        return
+    }
+    $python = $null
+    if ($conf.windows -and $conf.windows.python) { $python = [string]$conf.windows.python }
+    if (-not $python) { $python = (Get-Command python.exe -ErrorAction SilentlyContinue).Source }
+    if (-not $python -or -not (Test-Path $python)) { Stop-WithError 'python.exe bulunamadi (serverkit-windows.json: windows.python).' }
     $script = Join-Path $PSScriptRoot 'sites\sync.py'
     $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless `"$python`" `"$script`"" -WorkingDirectory (Join-Path $PSScriptRoot 'sites')
     $user = "$env:USERDOMAIN\$env:USERNAME"
@@ -343,26 +378,35 @@ function Set-SiteSync {
 }
 
 # Publish gateway for AIs that are not on this PC (windows/gateway):
-# https://deploy.tadadigital.shop, bearer-token protected.
+# https://<gateway_label>.<domain>, bearer-token protected.
 function Invoke-Gateway {
     param([string]$Action)
+    $conf = Get-SwkConfig -Required
+    $gwHost = "$($conf.domain.gateway_label).$($conf.domain.base)"
+    $gwMode = if ($conf.gateway -and $conf.gateway.mode) { [string]$conf.gateway.mode } else { 'local' }
+    $owner = @($conf.github.owners)[0]
     Assert-Installed
     Start-KeepAlive
     $installer = ConvertTo-WslPath (Join-Path $PSScriptRoot 'gateway\install.sh')
     switch ($Action) {
-        'on'     { Invoke-Linux @('bash', $installer, 'install') | Out-Null; Write-Good 'Gecit acik: https://deploy.tadadigital.shop' }
+        'on'     { Invoke-Linux @('bash', $installer, 'install') | Out-Null; Write-Good "Gecit acik ($gwMode): https://$gwHost" }
         'off'    { Invoke-Linux @('bash', $installer, 'off') | Out-Null; Write-Good 'Gecit kapatildi.' }
         'rotate' { Invoke-Linux @('bash', $installer, 'rotate') | Out-Null; Write-Good 'Yeni anahtar uretildi; eskisi artik calismaz. Yeni metin icin: ServerKit.bat gateway-prompt' }
         'prompt' {
             $token = (& wsl.exe -d $Distro -u root --exec bash $installer token 2>$null | Select-Object -Last 1).Trim()
-            if (-not $token) { Stop-WithError 'Anahtar okunamadi. Once: ServerKit.bat gateway-on' }
+            if ($gwMode -eq 'core') {
+                # core mode: the client's key is a per-user panel API key, not the gateway token.
+                Write-Warn 'gateway.mode "core": anahtar panelden alinan kisisel API anahtaridir (Ayarlar > API); metne <PANEL-API-ANAHTARI> yazildi.'
+                $token = '<PANEL-API-ANAHTARI>'
+            } elseif (-not $token) { Stop-WithError 'Anahtar okunamadi. Once: ServerKit.bat gateway-on' }
             $template = Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot 'gateway\PROMPT-TEMPLATE.txt')
+            $template = $template.Replace('{{GATEWAY_HOST}}', $gwHost).Replace('{{DOMAIN}}', [string]$conf.domain.base).Replace('{{GITHUB_OWNER}}', [string]$owner)
             $out = Join-Path ([Environment]::GetFolderPath('Desktop')) 'serverkit-yayin-metni.txt'
             [IO.File]::WriteAllText($out, $template.Replace('{{TOKEN}}', $token), (New-Object Text.UTF8Encoding $false))
             Write-Good "Bulut yapay zekasina verilecek metin masaustunde: $out"
             # claude.ai custom connectors take only an address, so the key rides in the path.
             $conn = Join-Path ([Environment]::GetFolderPath('Desktop')) 'serverkit-claude-baglayici.txt'
-            $connText = "Claude.ai > Ayarlar > Baglayicilar > Ozel baglayici ekle`r`n`r`nAd: ServerKit`r`nUzak MCP sunucu URL:`r`nhttps://deploy.tadadigital.shop/mcp/$token`r`n`r`nBu adres baglanti anahtarini icerir: kimseyle paylasma. Anahtari degistirirsen bu adres de degisir.`r`n"
+            $connText = "Claude.ai > Ayarlar > Baglayicilar > Ozel baglayici ekle`r`n`r`nAd: ServerKit`r`nUzak MCP sunucu URL:`r`nhttps://$gwHost/mcp/$token`r`n`r`nBu adres baglanti anahtarini icerir: kimseyle paylasma. Anahtari degistirirsen bu adres de degisir.`r`n"
             [IO.File]::WriteAllText($conn, $connText, (New-Object Text.UTF8Encoding $false))
             Write-Good "Claude.ai baglayici adresi masaustunde: $conn"
             Write-Warn 'Bu dosyada baglanti anahtari var; kimseyle paylasma, isin bitince silebilirsin.'
@@ -449,7 +493,7 @@ function Show-Help {
     Write-Host '    remote-on       Paneli internetten acilabilir yap (https://...trycloudflare.com)'
     Write-Host '    remote-link     Guncel uzaktan baglanti adresini goster'
     Write-Host '    remote-off      Uzaktan baglantiyi kapat'
-    Write-Host '    sync-on/off     GitHub degisince otomatik yayin (panelde Auto deploy acik siteler)'
+    Write-Host '    sync-on/off     Yedek: 3 dk bir GitHub kontrolu (yalnizca auto_deploy_mode "poll"; varsayilan webhook)'
     Write-Host '    sync-now        GitHub kontrolunu simdi calistir'
     Write-Host '    gateway-prompt  Bulut yapay zekasina verilecek yayin metnini (anahtarli) masaustune yaz'
     Write-Host '    gateway-rotate  Baglanti anahtarini degistir (eskisi gecersiz olur)'
@@ -522,7 +566,7 @@ switch ($Command) {
     'gateway-rotate' { Invoke-Gateway 'rotate' }
     'sync-on'       { Set-SiteSync $true }
     'sync-off'      { Set-SiteSync $false }
-    'sync-now'      { & python.exe (Join-Path $PSScriptRoot 'sites\sync.py') }
+    'sync-now'      { $c = Get-SwkConfig -Required; $py = if ($c.windows.python) { [string]$c.windows.python } else { 'python.exe' }; & $py (Join-Path $PSScriptRoot 'sites\sync.py') --now }
     'autostart-on'  { Set-Autostart $true }
     'autostart-off' { Set-Autostart $false }
     'uninstall'     { Invoke-Uninstall }
