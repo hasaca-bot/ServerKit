@@ -43,10 +43,12 @@ export function useDeployments(appId) {
                     commitSha: d.commit_sha || d.git_commit,
                     commitMessage: d.commit_message || d.description,
                     branch: d.branch,
-                    trigger: d.trigger || (d.auto ? 'push' : 'manual'),
+                    trigger: d.trigger || d.triggered_by || (d.auto ? 'push' : 'manual'),
                     duration: d.duration,
                     timestamp: d.created_at || d.timestamp,
                     logs: d.logs,
+                    // Why a push did not deploy (status 'skipped').
+                    reason: d.status === 'skipped' ? d.error_message : undefined,
                 }))
                 : [];
 

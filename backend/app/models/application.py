@@ -50,6 +50,12 @@ class Application(JsonColumnMixin, TimestampMixin, SoftDeleteMixin, db.Model):
     python_version = db.Column(db.String(10), nullable=True)  # '3.9', '3.10', '3.11', '3.12'
     port = db.Column(db.Integer, nullable=True)
     root_path = db.Column(db.String(500), nullable=True)
+    # Monorepo auto-deploy controls (git push webhook). root_dir is a path
+    # INSIDE the repository (root_path above is the checkout on this host);
+    # build_filter is JSON {"paths": [globs], "ignored_paths": [globs]}.
+    # NULL = every push deploys. See services/deploy_control_service.py.
+    root_dir = db.Column(db.String(500), nullable=True)
+    build_filter = db.Column(db.Text, nullable=True)
     # HTTP path used for health checks and the zero-downtime restart gate.
     # Populated from a manifest at import, editable in Settings. NULL => no gate
     # (the restart falls back to a fixed wait).
@@ -235,6 +241,8 @@ class Application(JsonColumnMixin, TimestampMixin, SoftDeleteMixin, db.Model):
             'slot_deploys_enabled': bool(self.slot_deploys_enabled),
             'active_slot': self.active_slot,
             'root_path': self.root_path,
+            'root_dir': self.root_dir,
+            'build_filter': self._build_filter_dict(),
             'docker_image': self.docker_image,
             'container_id': self.container_id,
             'registry_id': self.registry_id,
@@ -333,6 +341,10 @@ class Application(JsonColumnMixin, TimestampMixin, SoftDeleteMixin, db.Model):
     def _deploy_settings(self):
         from app.services.deploy_settings import effective
         return effective(self)
+
+    def _build_filter_dict(self):
+        from app.services.deploy_control_service import load_build_filter
+        return load_build_filter(self.build_filter)
 
     def __repr__(self):
         return f'<Application {self.name}>'

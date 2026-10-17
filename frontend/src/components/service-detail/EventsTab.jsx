@@ -139,7 +139,9 @@ const EventsTab = ({ appId }) => {
             status: getDeployStatus(deploy.status).label,
             tone: statusKind(deploy.status),
             actor: deploy.trigger || NONE,
-            text: deploy.commitMessage || deploy.version || `Deployment #${deployments.length - idx}`,
+            text: deploy.status === 'skipped' && deploy.reason
+                ? `${deploy.commitMessage || t('app.eventsTab.push', 'Push')} (${deploy.reason})`
+                : deploy.commitMessage || deploy.version || `Deployment #${deployments.length - idx}`,
             deploy,
         }));
         envHistory.forEach((entry, idx) => items.push({
@@ -166,7 +168,7 @@ const EventsTab = ({ appId }) => {
             detail: log.details?.name || '',
         }));
         return items.sort((a, b) => b.ts - a.ts);
-    }, [deployments, envHistory, auditLogs]);
+    }, [deployments, envHistory, auditLogs, t]);
 
     const rows = useMemo(() => {
         const needle = search.trim().toLowerCase();

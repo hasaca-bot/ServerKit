@@ -4,8 +4,11 @@ import hmac
 import hashlib
 import secrets
 import json
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class WebhookService:
@@ -289,7 +292,8 @@ class WebhookService:
             cls._extract_payload_info(log, source, event_type, payload_json)
 
         # Handle ping events
-        if event_type in ['ping', 'Push Hook']:
+        # ('Push Hook' is GitLab's push event; it is handled below, not a ping.)
+        if event_type == 'ping':
             log.status = 'processed'
             log.status_message = 'Ping received'
             log.processed_at = datetime.utcnow()
@@ -479,6 +483,24 @@ class WebhookService:
             deploy_app = (Application.query_active()
                           .filter_by(id=webhook.app_id).first()
                           if webhook.app_id else None)
+            skip_reason = (cls._deploy_skip_reason(webhook, deploy_app, log, payload)
+                           if webhook.deploy_on_push and deploy_app else None)
+            if skip_reason:
+                skipped = cls._record_skipped_deploy(webhook, deploy_app, log, pushed_branch, skip_reason)
+                log.status = 'ignored'
+                log.status_message = f'Deploy skipped: {skip_reason}'
+                log.processed_at = datetime.utcnow()
+                webhook.last_sync_at = datetime.utcnow()
+                webhook.last_sync_status = 'skipped'
+                webhook.last_sync_message = f'Deploy skipped: {skip_reason}'
+                return {
+                    'success': True,
+                    'message': f'Deploy skipped: {skip_reason}',
+                    'action': 'skipped',
+                    'reason': skip_reason,
+                    'commit': log.commit_sha,
+                    'deployment_id': skipped.id if skipped else None,
+                }
             if webhook.deploy_on_push and deploy_app:
                 deployment_result = GitDeployService.deploy(
                     app_id=webhook.app_id,
@@ -550,6 +572,52 @@ class WebhookService:
             webhook.last_sync_message = str(e)
 
             return {'success': False, 'error': str(e)}
+
+    @classmethod
+    def _deploy_skip_reason(cls, webhook, app, log, payload: Dict) -> Optional[str]:
+        """Why this push must not auto-deploy, or None to deploy.
+
+        Only webhook pushes get here; manual deploys never consult it.
+        """
+        from app.services import deploy_control_service as dc
+
+        source = log.source or webhook.source
+        message = dc.head_commit_message(source, payload) or log.commit_message
+        if dc.has_skip_deploy_marker(message):
+            return 'commit message contains a skip marker ([skip deploy])'
+
+        files = dc.changed_files(source, payload)
+        should_deploy, reason = dc.evaluate_build_filter(app.root_dir, app.build_filter, files)
+        if should_deploy:
+            if reason:
+                logger.info('Build filter for app %s: %s', app.id, reason)
+            return None
+        return reason
+
+    @classmethod
+    def _record_skipped_deploy(cls, webhook, app, log, branch: str, reason: str):
+        """Persist a skipped event so it shows in deployment history / Events.
+
+        version 0 keeps it out of the sequential release numbering and out of
+        rollback targets (which only consider status 'success').
+        """
+        from app import db
+        from app.models import GitDeployment
+        try:
+            now = datetime.utcnow()
+            row = GitDeployment(
+                app_id=app.id, webhook_id=webhook.id, version=0,
+                commit_sha=log.commit_sha, commit_message=log.commit_message,
+                branch=branch, triggered_by='webhook', status='skipped',
+                started_at=now, completed_at=now, duration_seconds=0,
+                error_message=reason,
+            )
+            db.session.add(row)
+            db.session.flush()
+            return row
+        except Exception:
+            logger.warning('Could not record skipped deploy for app %s', app.id, exc_info=True)
+            return None
 
     @classmethod
     def test_webhook(cls, webhook_id: int) -> Dict:

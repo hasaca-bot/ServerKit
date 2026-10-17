@@ -75,6 +75,7 @@ const DEPLOY_STATUS = {
     in_progress: { labelKey: 'app.serviceTypes.inProgress', label: 'In progress', color: '#f5b945' },
     rolled_back: { labelKey: 'app.serviceTypes.rolledBack', label: 'Rolled back', color: '#646b7a' },
     pending: { labelKey: 'app.serviceTypes.pending', label: 'Pending', color: '#49c7f0' },
+    skipped: { labelKey: 'app.serviceTypes.skipped', label: 'Skipped', color: '#646b7a' },
 };
 
 export function getServiceType(appType) {

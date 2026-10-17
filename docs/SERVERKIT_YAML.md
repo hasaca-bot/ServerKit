@@ -102,6 +102,8 @@ environment.
 | `type` | all | `web` / `worker` / `static` / `docker` → Application; `postgres` / `mysql` / `mariadb` / `redis` → ManagedDatabase. |
 | `runtime` | app | Build runtime hint (`python`, `node`, `static`, `docker`). |
 | `buildCommand` / `startCommand` | app | Buildpack command overrides. |
+| `rootDir` | app | Folder of the repository the service lives in. A push auto-deploys only if a changed file is inside it. |
+| `buildFilter` | app | `{paths: [globs], ignoredPaths: [globs]}`. A push auto-deploys only if a changed file matches `paths` (when set) and is not matched by `ignoredPaths`. A `[skip deploy]` / `[skip cd]` marker in the head commit message skips a push regardless. Manual deploys always run. |
 | `dockerfilePath` | app | Build the service from this Dockerfile in the repository (repo root = build context). Mutually exclusive with `image` and `containers` — see [Building from a Dockerfile](#building-from-a-dockerfile). |
 | `port` | app | Container listen port (1–65535). Keeps its HTTP/nginx semantics. |
 | `ports[]` | app | Typed L4 publishes (appliance tier) — see [Ports](#ports-appliance-tier). |

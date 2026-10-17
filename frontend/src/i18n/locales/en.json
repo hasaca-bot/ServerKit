@@ -780,6 +780,19 @@
         "bandwidthSparkline": {
             "dailyTransferSparkline": "Daily transfer sparkline"
         },
+        "buildFilterPanel": {
+            "ignored": "Ignored paths",
+            "ignoredHint": "One glob per line, e.g. docs/** or *.md. A change that only touches these does not deploy.",
+            "intro": "A push deploys only if at least one changed file matches. Leave everything empty to deploy on every push. Manual deploys always run.",
+            "markers": "Put [skip deploy] or [skip cd] in the latest commit message to skip a push. Put [skip preview] in a pull request title to skip its preview.",
+            "paths": "Include paths",
+            "pathsHint": "One glob per line, e.g. services/api/**. Empty means every path.",
+            "rootDir": "Root directory",
+            "rootDirHint": "Only changes inside this folder of the repository deploy, e.g. apps/web.",
+            "saveFailed": "Couldn't save the auto-deploy filters.",
+            "saved": "Auto-deploy filters saved",
+            "title": "Auto-deploy filters"
+        },
         "buildTab": {
             "autoDetect": "Auto-detect",
             "autoDetectionResults": "Auto-detection results",
@@ -2558,6 +2571,7 @@
             "noActivityYet": "No activity yet",
             "noBuildLogWasCapturedFor": "No build log was captured for this deployment.",
             "noSecurityEventsRecorded": "No security events recorded.",
+            "push": "Push",
             "searchActivity": "Search activity…",
             "securityEvents": "Security events",
             "triggeredBy": "Triggered by",
@@ -5766,6 +5780,7 @@
             "live": "Live",
             "pending": "Pending",
             "rolledBack": "Rolled back",
+            "skipped": "Skipped",
             "static": "Static",
             "stopped": "Stopped",
             "unknown": "Unknown",

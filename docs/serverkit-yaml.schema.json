@@ -92,6 +92,18 @@
           "type": "string",
           "minLength": 1
         },
+        "rootDir": {
+          "description": "Folder of the repository this service lives in. A push auto-deploys only if a changed file is inside it. Relative path only.",
+          "type": "string"
+        },
+        "buildFilter": {
+          "description": "Monorepo auto-deploy filter (Render-compatible): a push deploys only if at least one changed file matches `paths` (when set) and is not matched by `ignoredPaths`.",
+          "type": "object",
+          "properties": {
+            "paths": { "type": "array", "items": { "type": "string" } },
+            "ignoredPaths": { "type": "array", "items": { "type": "string" } }
+          }
+        },
         "port": {
           "description": "Container port the app listens on.",
           "type": "integer",
