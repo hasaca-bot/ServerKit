@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import useSettingFocus from '../../hooks/useSettingFocus';
 import { useTranslation } from 'react-i18next';
 import { formatDate } from '@/utils/intl';
+import PlanUsageSection from './PlanUsageSection';
 
 const ProfileTab = () => {
     const { t } = useTranslation();
@@ -96,6 +97,7 @@ const ProfileTab = () => {
                     </Button>
                 </div>
             </form>
+            <PlanUsageSection />
         </div>
     );
 };

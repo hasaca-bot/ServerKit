@@ -4399,6 +4399,20 @@
         "pipelineStrip": {
             "deploymentSteps": "Deployment steps"
         },
+        "planUsage": {
+            "admin": "Administrator, no limits",
+            "kindApps": "Services",
+            "kindCronJobs": "Cron jobs",
+            "kindCustomDomains": "Custom domains",
+            "kindDatabases": "Databases",
+            "kindMcpKeys": "API / MCP keys",
+            "kindPreviews": "Preview environments",
+            "kindServers": "Servers",
+            "perService": "Per service: up to {{cpu}} CPU and {{memory}} MB memory.",
+            "sleeps": "Idle services sleep after {{minutes}} minutes.",
+            "title": "Plan & usage",
+            "unlimited": "Unlimited"
+        },
         "pooler": {
             "couldntChangePooler": "Couldn't change the connection pooler.",
             "hint": "Runs PgBouncer in transaction mode beside this database, so many client connections share a few server connections. Services opt in by referencing pooledUrl instead of connectionString.",
@@ -7506,6 +7520,11 @@
             "notEnabled": "Not enabled",
             "notEnrolled": "Not enrolled",
             "passkey": "Passkey",
+            "plan": "Plan",
+            "planDefault": "Default ({{plan}})",
+            "planFailed": "Couldn't change the user's plan.",
+            "planFor": "Plan for {{username}}",
+            "planUnlimited": "Unlimited",
             "role": "Role",
             "signInMethod": "Sign-in provider",
             "updateFailed": "Couldn't update the user's status.",
