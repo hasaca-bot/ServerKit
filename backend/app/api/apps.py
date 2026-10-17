@@ -713,8 +713,15 @@ def revoke_app_access(app_id, grant_id):
 @apps_bp.route('/from-repository', methods=['POST'])
 @jwt_required()
 def create_app_from_repository():
-    """Create a new application by cloning a Git repository."""
-    user = require_admin_user()
+    """Create a new application by cloning a Git repository.
+
+    Developers may deploy repositories reachable through their OWN source
+    connection (tenant isolation); raw git URLs and host-executed build
+    commands stay admin-only. Counts against the caller's plan.
+    """
+    user = get_current_user()
+    if not user or not user.is_developer:
+        raise PermissionDeniedError('Developer access required')
 
     data = json_object()
     name = _service_slug(data.get('name'))
@@ -737,23 +744,20 @@ def create_app_from_repository():
 
     if not name or len(name) < 2:
         return jsonify({'error': 'Service name must be at least 2 characters'}), 400
-    if source_connection_id:
-        try:
-            source_repo = SourceConnectionService.get_authenticated_clone_url(
-                user_id=user.id,
-                connection_id=int(source_connection_id),
-                full_name=repository_full_name,
-            )
-            clone_repo_url = source_repo['clone_url']
-            deploy_repo_url = source_repo['public_url']
-        except (TypeError, ValueError) as exc:
-            return jsonify({'error': str(exc)}), 400
-    else:
-        clone_repo_url = repo_url
-        deploy_repo_url = repo_url
-
-    if not clone_repo_url:
+    if not user.is_admin:
+        # Custom build/start commands run on the host, not in a container.
+        if build_method == 'custom' or custom_build_cmd or custom_start_cmd:
+            raise PermissionDeniedError('Only an administrator can set custom build or start commands')
+    from app.services.plan_quota_service import PlanQuotaService
+    PlanQuotaService.check(user, 'apps')
+    from app.services.repository_access_service import resolve_clone_source
+    if not source_connection_id and not repo_url and user.is_admin:
         raise field_required('repo_url')
+    source_repo = resolve_clone_source(
+        user, source_connection_id=source_connection_id,
+        repository_full_name=repository_full_name, repo_url=repo_url)
+    clone_repo_url = source_repo['clone_url']
+    deploy_repo_url = source_repo['public_url']
 
     valid_app_types = ['auto', 'docker', 'flask', 'django', 'php', 'static']
     if app_type not in valid_app_types:
@@ -820,6 +824,11 @@ def create_app_from_repository():
     dockerfile_path = dockerfile_path or recommended.get('dockerfile_path') or 'Dockerfile'
     custom_build_cmd = custom_build_cmd or recommended.get('custom_build_cmd')
     custom_start_cmd = custom_start_cmd or recommended.get('custom_start_cmd')
+    if not user.is_admin:
+        # A repository's manifest may not smuggle in host-executed commands.
+        custom_build_cmd = custom_start_cmd = None
+        if resolved_build_method == 'custom':
+            resolved_build_method = 'auto'
 
     # When the build method routes through the build-pack layer, persist the
     # (possibly overridden) plan on the Application so the generated Dockerfile is
@@ -848,7 +857,9 @@ def create_app_from_repository():
     # contains used to start the web container without its database. An
     # explicit non-compose choice from the caller still wins.
     compose_file = None
-    if (manifest_strategy == 'docker_compose' and app_type in ('auto', 'docker')
+    # Compose projects can mount host paths / run privileged: admin-only.
+    if (user.is_admin and manifest_strategy == 'docker_compose'
+            and app_type in ('auto', 'docker')
             and build_method in ('auto', 'dockerfile')):
         compose_file = next((m.get('file') for m in manifest.get('manifests') or []
                              if m.get('type') == 'docker_compose'), None)
@@ -886,6 +897,7 @@ def create_app_from_repository():
                 'buildpack_overrides': buildpack_overrides,
             },
         )
+        PlanQuotaService.apply_plan_to_new_app(user, app)
 
         return jsonify({
             'message': 'Repository service created',
@@ -948,6 +960,9 @@ def create_app():
     if clash:
         raise ValidationError(clash)
 
+    from app.services.plan_quota_service import PlanQuotaService
+    PlanQuotaService.check(user, 'apps')
+
     # Stamp the workspace (#33): the requested one (membership-checked) or the default.
     from app.services.workspace_service import WorkspaceService
     ws_id = WorkspaceService.resolve_workspace_id(
@@ -985,6 +1000,7 @@ def create_app():
 
     db.session.add(app)
     db.session.commit()
+    PlanQuotaService.apply_plan_to_new_app(user, app)
 
     return jsonify({
         'message': 'Service created',
@@ -1568,6 +1584,20 @@ def update_sleep_policy(app_id):
     if not _can_edit_app(user, app):
         raise permission_denied()
     data = json_object()
+    # Hosting plan: a plan with idle sleep keeps it on, at most that idle time.
+    from app.services.plan_quota_service import PlanQuotaService, QuotaExceededError, quota_owner
+    plan = PlanQuotaService.plan_for(quota_owner(user, app))
+    if plan is not None and plan.sleep_after_minutes:
+        idle = data.get('idle_timeout_minutes')
+        try:
+            too_long = idle is not None and int(idle) > plan.sleep_after_minutes
+        except (TypeError, ValueError):
+            too_long = False
+        if data.get('enabled') is False or too_long:
+            raise QuotaExceededError(
+                f'Your plan puts idle services to sleep after at most '
+                f'{plan.sleep_after_minutes} minutes.',
+                details={'kind': 'sleep', 'limit': plan.sleep_after_minutes})
     policy = ContainerSleepService.set_policy(
         app_id, enabled=data.get('enabled'), idle_timeout_minutes=data.get('idle_timeout_minutes'))
     return jsonify(policy.to_dict())
@@ -1691,12 +1721,31 @@ def update_app_resources(app_id):
 
     data = json_object()
     try:
+        cpu = memory = None
         if 'cpu_limit' in data:
-            app.cpu_limit = DockerService.validate_cpu_limit(data['cpu_limit'])
+            cpu = DockerService.validate_cpu_limit(data['cpu_limit'])
         if 'memory_limit' in data:
-            app.memory_limit = DockerService.validate_memory_limit(data['memory_limit'])
+            memory = DockerService.validate_memory_limit(data['memory_limit'])
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
+
+    # Hosting plan: per-service caps of the app owner's plan (admins exempt).
+    # Clearing a limit on a capped plan falls back to the plan's cap.
+    from app.services.plan_quota_service import PlanQuotaService, memory_to_mb, quota_owner
+    owner = quota_owner(user, app)
+    plan = PlanQuotaService.plan_for(owner)
+    if plan is not None:
+        if 'cpu_limit' in data and cpu is None and plan.max_cpu is not None:
+            cpu = f'{plan.max_cpu:g}'
+        if 'memory_limit' in data and memory is None and plan.max_memory_mb is not None:
+            memory = f'{plan.max_memory_mb}m'
+        PlanQuotaService.check_resources(
+            owner, cpu=float(cpu) if cpu is not None else None,
+            memory_mb=memory_to_mb(memory))
+    if 'cpu_limit' in data:
+        app.cpu_limit = cpu
+    if 'memory_limit' in data:
+        app.memory_limit = memory
 
     db.session.commit()
 

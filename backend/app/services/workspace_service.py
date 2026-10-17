@@ -150,8 +150,15 @@ class WorkspaceService:
         servers outside any named workspace or in one they are a member of.
         The Default workspace counts as none — servers created without a
         context are stamped into it, and nobody is a member of it.
-        The one rule for both the REST routes and the Socket.IO rooms."""
-        if user.is_admin or not server.workspace_id:
+        The one rule for both the REST routes and the Socket.IO rooms.
+
+        Tenant ownership comes first: a non-admin must own the server
+        (Server.owner_id, see app/services/server_access.py)."""
+        if user.is_admin:
+            return True
+        if server.owner_id is None or server.owner_id != user.id:
+            return False
+        if not server.workspace_id:
             return True
         default = Workspace.query.filter_by(
             slug=WorkspaceService.DEFAULT_WORKSPACE_SLUG).first()

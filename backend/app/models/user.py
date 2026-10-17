@@ -30,6 +30,9 @@ class User(JsonColumnMixin, db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login_at = db.Column(db.DateTime, nullable=True)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+    # Hosting plan (migration 112). NULL = the panel default plan; admins are
+    # never limited. See app/services/plan_quota_service.py.
+    plan_id = db.Column(db.Integer, db.ForeignKey('plans.id'), nullable=True, index=True)
 
     @validates('email')
     def _normalize_email(self, key, email):
@@ -230,6 +233,7 @@ class User(JsonColumnMixin, db.Model):
             'updated_at': self.updated_at.isoformat(),
             'last_login_at': self.last_login_at.isoformat() if self.last_login_at else None,
             'created_by': self.created_by,
+            'plan_id': self.plan_id,
             'is_admin': self.is_admin
         }
 

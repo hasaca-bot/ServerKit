@@ -1,0 +1,45 @@
+// ============================================
+// Plan & usage (Settings > Profile, Settings > Users)
+// ============================================
+
+.plan-usage {
+    .section-header {
+        display: flex;
+        align-items: center;
+        gap: $space-3;
+    }
+
+    &__list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: $space-3;
+    }
+
+    &__row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: $space-2 $space-3;
+        align-items: center;
+    }
+
+    &__label { font-size: $text-sm; }
+
+    &__count {
+        font-family: $font-mono;
+        font-size: $text-xs;
+        color: $text-muted;
+    }
+
+    &__gauge { grid-column: 1 / -1; }
+
+    &__note {
+        margin-top: $space-3;
+        font-size: $text-xs;
+        color: $text-muted;
+    }
+}
+
+.users-tab__plan-select { min-width: 110px; }

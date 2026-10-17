@@ -177,6 +177,11 @@ def claim():
     if not code or not passphrase:
         return jsonify({'error': 'code and passphrase are required'}), 400
 
+    # Hosting plan: a claimed agent becomes a server the operator owns.
+    from app.middleware.rbac import get_current_user
+    from app.services.plan_quota_service import PlanQuotaService
+    PlanQuotaService.check(get_current_user(), 'servers')
+
     try:
         result = pairing_service.claim(
             operator_user_id=user_id,

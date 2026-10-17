@@ -21,6 +21,13 @@ from app.api._request import json_object
 proxy_bp = Blueprint('proxy', __name__)
 
 
+@proxy_bp.before_request
+def _enforce_server_ownership():
+    """Non-admins reach only servers they own (tenant isolation)."""
+    from app.services.server_access import enforce_server_view_arg
+    return enforce_server_view_arg()
+
+
 def _require_server(server_id):
     """Return (server, None) or (None, error_response_tuple)."""
     server = Server.query.get(server_id)

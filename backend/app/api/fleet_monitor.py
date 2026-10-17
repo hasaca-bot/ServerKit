@@ -16,6 +16,13 @@ from app.api._request import json_object
 fleet_monitor_bp = Blueprint('fleet_monitor', __name__)
 
 
+@fleet_monitor_bp.before_request
+def _enforce_server_ownership():
+    """Non-admins reach only servers they own (tenant isolation)."""
+    from app.services.server_access import enforce_server_view_arg
+    return enforce_server_view_arg()
+
+
 # ==================== Heatmap ====================
 
 @fleet_monitor_bp.route('/heatmap', methods=['GET'])

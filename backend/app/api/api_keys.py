@@ -55,6 +55,11 @@ def create_key():
         except (ValueError, AttributeError):
             return jsonify({'error': 'Invalid expires_at format'}), 400
 
+    # Hosting plan: every live key (the MCP endpoint authenticates with them)
+    # counts against the caller's plan.
+    from app.services.plan_quota_service import PlanQuotaService
+    PlanQuotaService.check(user, 'mcp_keys')
+
     api_key, raw_key = ApiKeyService.create_key(
         user_id=user.id,
         name=name,

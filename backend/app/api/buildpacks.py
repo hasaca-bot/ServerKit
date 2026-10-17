@@ -60,6 +60,16 @@ def detect():
     repository_full_name = (data.get('repository_full_name') or '').strip()
     app_name = (data.get('name') or 'app').strip() or 'app'
 
+    # Tenant isolation: server paths and raw git URLs are admin-only; anyone
+    # else detects a repository of their own source connection.
+    from app.services.repository_access_service import (
+        require_no_local_path, resolve_clone_source,
+    )
+    require_no_local_path(caller, explicit_path)
+    if not (caller and caller.is_admin) and (repo_url or source_connection_id):
+        resolve_clone_source(caller, source_connection_id=source_connection_id,
+                             repository_full_name=repository_full_name, repo_url=repo_url)
+
     # ---- Path supplied: detect in place, no clone. --------------------------
     if explicit_path:
         if not os.path.isdir(explicit_path):

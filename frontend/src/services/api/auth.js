@@ -314,6 +314,27 @@ export async function updateSSOGeneralSettings(settings) {
     });
 }
 
+// Hosting plans
+export async function getMyPlan() {
+    return this.request('/plan');
+}
+
+export async function getPlans() {
+    return this.request('/plans');
+}
+
+export async function updatePlan(slug, data) {
+    return this.request(`/plans/${encodeURIComponent(slug)}`, { method: 'PUT', body: data });
+}
+
+export async function setDefaultPlan(slug) {
+    return this.request('/plans/settings/default', { method: 'PUT', body: { slug } });
+}
+
+export async function assignUserPlan(userId, slug) {
+    return this.request(`/plans/users/${userId}`, { method: 'PUT', body: { plan: slug || null } });
+}
+
 // API Keys
 export async function getApiKeys() {
     return this.request('/api-keys/');

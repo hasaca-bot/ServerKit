@@ -8,6 +8,7 @@ import { useConfirm } from '../../hooks/useConfirm';
 import useFormat from '../../hooks/useFormat';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
 import { DataTable } from '@/components/ds';
 import {
     useTableChrome, GridViewPicker, GridChips, GridFilterButton,
@@ -95,6 +96,9 @@ const UsersTab = () => {
     const [showModal, setShowModal] = useState(false);
     const [editingUser, setEditingUser] = useState(null);
     const [pendingUserId, setPendingUserId] = useState(null);
+    // Hosting plans for the per-user plan selector; empty if the list fails.
+    const [plans, setPlans] = useState([]);
+    const [defaultPlanSlug, setDefaultPlanSlug] = useState(null);
     const actionInFlight = useRef(false);
     const { confirm } = useConfirm();
     const { formatDateTime } = useFormat();
@@ -128,6 +132,29 @@ const UsersTab = () => {
     useEffect(() => {
         loadUsers();
     }, [loadUsers]);
+
+    useEffect(() => {
+        api.getPlans()
+            .then((data) => {
+                setPlans(data.plans || []);
+                setDefaultPlanSlug(data.default_plan_slug || null);
+            })
+            .catch(() => setPlans([]));
+    }, []);
+
+    const planSlugFor = (user) => plans.find((p) => p.id === user.plan_id)?.slug || '__default__';
+
+    async function handleAssignPlan(user, slug) {
+        setPendingUserId(user.id);
+        try {
+            await api.assignUserPlan(user.id, slug === '__default__' ? null : slug);
+            await loadUsers();
+        } catch (err) {
+            setError(err.message || t('app.usersTab.planFailed', "Couldn't change the user's plan."));
+        } finally {
+            setPendingUserId(null);
+        }
+    }
 
     function handleAddUser() {
         setEditingUser(null);
@@ -259,6 +286,36 @@ const UsersTab = () => {
                     {user.role}
                 </Badge>
             ),
+        },
+        {
+            key: 'plan',
+            headerKey: 'app.usersTab.plan', header: 'Plan',
+            type: 'enum',
+            value: (user) => (user.is_admin ? 'admin' : planSlugFor(user)),
+            render: (user) => (user.is_admin || plans.length === 0
+                ? <span className="date-cell">{user.is_admin ? t('app.usersTab.planUnlimited', 'Unlimited') : '-'}</span>
+                : (
+                    <Select
+                        value={planSlugFor(user)}
+                        disabled={pendingUserId !== null}
+                        onValueChange={(slug) => handleAssignPlan(user, slug)}
+                    >
+                        <SelectTrigger size="sm" className="users-tab__plan-select"
+                            aria-label={t('app.usersTab.planFor', 'Plan for {{username}}', { username: user.username })}>
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="__default__">
+                                {t('app.usersTab.planDefault', 'Default ({{plan}})', {
+                                    plan: plans.find((p) => p.slug === defaultPlanSlug)?.name || defaultPlanSlug || '-',
+                                })}
+                            </SelectItem>
+                            {plans.map((plan) => (
+                                <SelectItem key={plan.slug} value={plan.slug}>{plan.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                )),
         },
         {
             key: 'status',

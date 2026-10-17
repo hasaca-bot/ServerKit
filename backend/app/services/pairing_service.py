@@ -380,6 +380,7 @@ def claim(operator_user_id: int, code: str, passphrase: str,
         status='connecting',
         registered_at=datetime.utcnow(),
         registered_by=operator_user_id,
+        owner_id=operator_user_id,
         group_id=group_id,
     )
     server.id = str(__import__('uuid').uuid4())

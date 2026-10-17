@@ -309,6 +309,38 @@ class SourceConnectionService:
             auth_url = f'https://x-access-token:{quote(token, safe="")}@github.com/{owner}/{repo}.git'
         return {'clone_url': auth_url, 'public_url': public_url}
 
+    @classmethod
+    def connection_can_reach(cls, user_id, connection_id, full_name):
+        """Whether *full_name* is a repository the user's OWN connection grants
+        (tenant isolation, docs/HOSTING-ROADMAP.md §1): on GitHub, a repository of one of
+        the App's installations, or — for an OAuth connection — one the user can
+        push to; on GitLab/Bitbucket, one the token can read. Any lookup failure
+        answers False."""
+        connection = SourceConnection.query.filter_by(id=connection_id, user_id=user_id).first()
+        if not connection or not full_name:
+            return False
+        try:
+            token = cls._decrypt_connection_token(connection)
+            if connection.provider == 'github':
+                wanted = full_name.strip().lower()
+                if cls._github_app_slug():
+                    return any((r.get('full_name') or '').lower() == wanted
+                               for r in cls._list_github_app_repos(token))
+                owner, repo = cls._split_full_name(full_name)
+                data = cls._github_get(token, f'/repos/{quote(owner)}/{quote(repo)}')
+                perms = (data or {}).get('permissions') or {}
+                return bool(perms.get('push') or perms.get('admin') or perms.get('maintain'))
+            if connection.provider == 'gitlab':
+                repo_path = cls._gitlab_repo_path(full_name)
+                return bool(cls._gitlab_get(token, f'/projects/{quote(repo_path, safe="")}'))
+            if connection.provider == 'bitbucket':
+                workspace, repo_slug = cls._split_full_name(full_name)
+                return bool(cls._bitbucket_get(
+                    token, f'/repositories/{quote(workspace)}/{quote(repo_slug)}'))
+        except Exception:
+            return False
+        return False
+
     # ==================================================================
     # Shared OAuth plumbing. The three providers differ only in the facts
     # below; config, the authorize hop, the code exchange and the stored

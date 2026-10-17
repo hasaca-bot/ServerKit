@@ -275,6 +275,17 @@ class PreviewService:
                     or preview.status == ApplicationPreview.STATUS_DESTROYED) \
                     and has_skip_preview_marker(pr_title):
                 return {'skipped': True, 'reason': 'skip_preview_marker'}
+            # Hosting plan: a new (or revived) preview counts against the app
+            # owner's plan; following an existing one never does.
+            if (preview is None or preview.deleted_at is not None
+                    or preview.status == ApplicationPreview.STATUS_DESTROYED):
+                from app.models import User
+                from app.services.plan_quota_service import PlanQuotaService, QuotaExceededError
+                try:
+                    PlanQuotaService.check(User.query.get(app.user_id), 'previews')
+                except QuotaExceededError as exc:
+                    return {'error': exc.message, 'code': exc.code,
+                            'skipped': True, 'reason': 'quota_exceeded'}
             if not preview:
                 preview = ApplicationPreview(application_id=app.id, pr_number=pr_number)
                 db.session.add(preview)

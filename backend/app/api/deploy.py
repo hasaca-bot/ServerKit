@@ -233,6 +233,11 @@ def get_branches_from_url():
     data = json_object()
     if not data or 'repo_url' not in data:
         return jsonify({'error': 'repo_url is required'}), 400
+    # Tenant isolation: non-admins browse repositories through their own
+    # source connection (/source-connections/.../branches), never a raw URL.
+    from app.middleware.rbac import get_current_user
+    from app.services.repository_access_service import resolve_clone_source
+    resolve_clone_source(get_current_user(), repo_url=data['repo_url'])
 
     result = GitService.get_remote_branches_from_url(data['repo_url'])
     return jsonify(result), 200 if result.get('success') else 400

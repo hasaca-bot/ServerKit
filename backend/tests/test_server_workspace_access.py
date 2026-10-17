@@ -17,7 +17,9 @@ def setup(app):
     ws = WorkspaceService.create_workspace({'name': 'SWA'}, admin.id)
     WorkspaceService.add_member(ws.id, member.id)
     mine = WorkspaceService.create_workspace({'name': 'SWA-out'}, outsider.id)
-    server = make_server(db, name='swa-box', workspace_id=ws.id)
+    # The member owns it: non-admins operate only servers they own, and the
+    # workspace rule narrows that further.
+    server = make_server(db, name='swa-box', workspace_id=ws.id, owner_id=member.id)
     return {'server': server.id, 'member': member.id, 'outsider': outsider.id,
             'admin': admin.id, 'own_ws': mine.id}
 
@@ -63,15 +65,18 @@ def test_member_can_regenerateheaders_for(client, setup):
     assert resp.get_json()['registration_token']
 
 
-def test_default_workspace_servers_stay_shared(client, setup):
-    """Servers created without a context land in the Default workspace, which
-    nobody joins — developers keep operating them."""
+def test_default_workspace_servers_are_owner_only(client, setup):
+    """Servers in the Default workspace (which nobody joins) are operable by
+    their owner only; another developer gets a 404 (tenant isolation)."""
     from app import db
     from app.services.workspace_service import WorkspaceService
-    server = make_server(db, name='swa-default',
+    server = make_server(db, name='swa-default', owner_id=setup['outsider'],
                          workspace_id=WorkspaceService.ensure_default_workspace().id)
     with patch('app.services.terminal_service.TerminalService.create_session',
                return_value={'success': True, 'session_id': 's2'}):
         resp = client.post(f'/api/v1/servers/{server.id}/terminal', json={},
                            headers=headers_for(setup['outsider']))
-    assert resp.status_code == 200
+        assert resp.status_code == 200
+        resp = client.post(f'/api/v1/servers/{server.id}/terminal', json={},
+                           headers=headers_for(setup['member']))
+    assert resp.status_code == 404
