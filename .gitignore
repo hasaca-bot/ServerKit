@@ -234,3 +234,6 @@ frontend/test-results/
 # Windows port (windows/): local-only artefacts
 windows/_old-native-attempt/
 windows/**/__pycache__/
+
+# Windows port: the owner's real config (copy of serverkit-windows.example.json)
+windows/serverkit-windows.json

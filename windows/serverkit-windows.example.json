@@ -1,0 +1,65 @@
+{
+  "_comment": "Copy this file to windows/serverkit-windows.json (gitignored) and replace every value that says example / your / YOU. Every script in windows/ reads that one file. Backslashes in Windows paths are doubled, as JSON requires.",
+
+  "windows": {
+    "user_profile": "C:\\Users\\YOU",
+    "repo_root": "C:\\Users\\YOU\\Desktop\\ServerKit",
+    "python": "C:\\Users\\YOU\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+    "skctl": "",
+    "state_dir": ""
+  },
+
+  "wsl": {
+    "distro": "ServerKit"
+  },
+
+  "domain": {
+    "base": "example.com",
+    "gateway_label": "deploy",
+    "panel_label": "panel"
+  },
+
+  "tunnel": {
+    "name": "your-tunnel",
+    "wildcard": false
+  },
+
+  "github": {
+    "owners": ["your-github-user"]
+  },
+
+  "ports": {
+    "min": 4100,
+    "max": 4999
+  },
+
+  "reserved_names": ["www", "panel", "deploy", "api", "admin", "mail", "smtp", "ftp", "root",
+                     "app", "status", "cdn", "static", "ns1", "ns2"],
+
+  "limits": {
+    "databases_per_site": 2,
+    "cron_per_site": 10,
+    "cron_min_interval_minutes": 5,
+    "rate_per_minute": 30,
+    "bad_key_limit": 10,
+    "bad_key_window_minutes": 10
+  },
+
+  "panel": {
+    "url": "http://localhost",
+    "port": 5000,
+    "public_url": "https://panel.example.com"
+  },
+
+  "auto_deploy_mode": "webhook",
+
+  "gateway": {
+    "mode": "local",
+    "port": 8711
+  },
+
+  "brain": {
+    "vault": "",
+    "notes_dir": "serverkit-windows"
+  }
+}
