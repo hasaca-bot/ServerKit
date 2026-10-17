@@ -287,7 +287,7 @@ def test_set_server_workspace_api(app, client):
     dev = _mk_user(db, 'sw_dev', 'developer')
     viewer = _mk_user(db, 'sw_viewer', 'viewer')
     ws = WorkspaceService.create_workspace({'name': 'SrvWS'}, admin.id)
-    s = Server(name='srv-move', registered_by=admin.id,
+    s = Server(name='srv-move', registered_by=admin.id, owner_id=dev.id,
                workspace_id=WorkspaceService.ensure_default_workspace().id)
     db.session.add(s)
     db.session.commit()
@@ -306,19 +306,23 @@ def test_set_server_workspace_api(app, client):
     assert r.status_code == 403
 
 
-def test_servers_list_global_without_context(app, client):
+def test_servers_list_is_owner_scoped_without_context(app, client):
     from app import db
     from app.models import Server
 
     admin = _mk_user(db, 'srv_admin', 'admin')
     dev = _mk_user(db, 'srv_dev', 'developer')
-    db.session.add(Server(name='srv-a', registered_by=admin.id))
+    db.session.add(Server(name='srv-a', registered_by=admin.id, owner_id=admin.id))
+    db.session.add(Server(name='srv-dev', registered_by=dev.id, owner_id=dev.id))
     db.session.commit()
 
-    # Servers are global today: a non-admin with no workspace context still sees them.
+    # Tenant isolation: a non-admin lists only the servers they own.
     r = client.get('/api/v1/servers', headers=_token(dev.id))
     assert r.status_code == 200
-    assert any(s['name'] == 'srv-a' for s in r.get_json())
+    assert [s['name'] for s in r.get_json()] == ['srv-dev']
+    # The admin still sees every server.
+    r = client.get('/api/v1/servers', headers=_token(admin.id))
+    assert {s['name'] for s in r.get_json()} == {'srv-a', 'srv-dev'}
 
 
 def test_wordpress_sites_scoping_api(app, client, wp_extension):

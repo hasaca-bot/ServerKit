@@ -82,6 +82,14 @@ def _resolve_token_expiry(expires_in):
 servers_bp = Blueprint('servers', __name__)
 
 
+@servers_bp.before_request
+def _enforce_server_ownership():
+    """Tenant isolation for every ``/<server_id>/...`` route on this blueprint
+    (detail, metrics, commands, docker, files, terminal, ...)."""
+    from app.services.server_access import enforce_server_view_arg
+    return enforce_server_view_arg()
+
+
 def _agent_failure_status(result):
     """HTTP status for a failed agent command: an offline agent is a 503 and
     a refused command a 403, so the UI can say which; anything else is 500."""
@@ -228,7 +236,14 @@ def get_group(group_id):
     if not group:
         return jsonify({'error': 'Group not found'}), 404
 
-    return jsonify(group.to_dict(include_servers=True))
+    result = group.to_dict(include_servers=True)
+    user = get_current_user()
+    if not user.is_admin:
+        from app.services.server_access import ServerAccess
+        result['servers'] = [s.to_dict() for s in group.servers
+                             if ServerAccess.can_access(user, s)]
+        result['server_count'] = len(result['servers'])
+    return jsonify(result)
 
 
 @servers_bp.route('/groups/<group_id>', methods=['PUT'])
@@ -291,8 +306,8 @@ def list_servers():
     status = request.args.get('status')
     tag = request.args.get('tag')
 
-    # Workspace-aware scoping (#33). Servers are global today, so with no workspace
-    # context this stays unfiltered; with a workspace context it filters to it.
+    # Workspace-aware scoping (#33): with a workspace context it filters to it.
+    # Ownership (below) then limits a non-admin to the servers they own.
     from app.models import User
     from app.services.workspace_service import WorkspaceService
     user = get_current_user()
@@ -300,6 +315,9 @@ def list_servers():
         user, request.headers.get('X-Workspace-Id') or request.args.get('workspace_id'))
     query = WorkspaceService.scope_query(Server.query, Server, user,
                                          workspace_id=ws_id, owner_attr=None)
+    # Tenant isolation: a non-admin lists only the servers they own.
+    from app.services.server_access import ServerAccess
+    query = ServerAccess.scoped_servers(user, query)
 
     if group_id:
         query = query.filter_by(group_id=group_id)
@@ -909,10 +927,12 @@ def compare_server_metrics():
     if not server_ids or server_ids == ['']:
         return jsonify({'error': 'Server IDs required'}), 400
 
+    from app.services.server_access import ServerAccess
+    user = get_current_user()
     result = {}
     for server_id in server_ids:
         server = Server.query.get(server_id)
-        if not server:
+        if not server or not ServerAccess.can_access(user, server):
             continue
 
         metrics = ServerMetrics.query.filter_by(server_id=server_id)\
@@ -940,9 +960,11 @@ def compare_server_metrics():
 @jwt_required()
 def get_servers_overview():
     """Get overview of all servers health"""
-    servers = Server.query.options(joinedload(Server.group)).all()
+    from app.services.server_access import ServerAccess
+    servers = ServerAccess.scoped_servers(get_current_user()).options(
+        joinedload(Server.group)).all()
     metrics_by_server = latest_metrics_by_server(server.id for server in servers)
-    connected_ids = set(agent_registry.get_connected_servers())
+    connected_ids = set(agent_registry.get_connected_servers()) & {s.id for s in servers}
 
     total = len(servers)
     online = len(connected_ids)
@@ -1217,6 +1239,11 @@ def get_all_security_alerts():
         alert_type=alert_type,
         limit=limit
     )
+    user = get_current_user()
+    if not user.is_admin:
+        from app.services.server_access import ServerAccess
+        owned = {s.id for s in ServerAccess.scoped_servers(user).with_entities(Server.id)}
+        alerts = [a for a in alerts if a.server_id in owned]
 
     return jsonify([a.to_dict() for a in alerts])
 
@@ -1226,7 +1253,21 @@ def get_all_security_alerts():
 def get_security_alert_counts():
     """Get counts of security alerts by status and severity"""
     server_id = request.args.get('server_id')
-    counts = anomaly_detection_service.get_alert_counts(server_id=server_id)
+    user = get_current_user()
+    if user.is_admin:
+        return jsonify(anomaly_detection_service.get_alert_counts(server_id=server_id))
+    from app.services.server_access import ServerAccess
+    if server_id:
+        ServerAccess.get_owned_server_or_404(user, server_id)
+        return jsonify(anomaly_detection_service.get_alert_counts(server_id=server_id))
+    # Non-admin without a server: sum over the servers they own.
+    counts = {'by_status': {}, 'by_severity': {}, 'total': 0}
+    for (owned_id,) in ServerAccess.scoped_servers(user).with_entities(Server.id):
+        part = anomaly_detection_service.get_alert_counts(server_id=owned_id)
+        for key in ('by_status', 'by_severity'):
+            for name, value in (part.get(key) or {}).items():
+                counts[key][name] = counts[key].get(name, 0) + value
+        counts['total'] += part.get('total', 0)
     return jsonify(counts)
 
 
@@ -1236,6 +1277,10 @@ def acknowledge_alert(alert_id):
     """Acknowledge a security alert"""
     alert = SecurityAlert.query.get(alert_id)
     if not alert:
+        return jsonify({'error': 'Alert not found'}), 404
+    from app.services.server_access import ServerAccess
+    user = get_current_user()
+    if not user.is_admin and not ServerAccess.can_access(user, Server.query.get(alert.server_id)):
         return jsonify({'error': 'Alert not found'}), 404
 
     user_id = get_jwt_identity()
@@ -1250,6 +1295,10 @@ def resolve_alert(alert_id):
     """Resolve a security alert"""
     alert = SecurityAlert.query.get(alert_id)
     if not alert:
+        return jsonify({'error': 'Alert not found'}), 404
+    from app.services.server_access import ServerAccess
+    user = get_current_user()
+    if not user.is_admin and not ServerAccess.can_access(user, Server.query.get(alert.server_id)):
         return jsonify({'error': 'Alert not found'}), 404
 
     user_id = get_jwt_identity()

@@ -18,6 +18,14 @@ from app.api._request import json_object
 def get_available_servers():
     """Get list of servers available for Docker operations"""
     servers = RemoteDockerService.get_available_servers()
+    from app.middleware.rbac import get_current_user
+    user = get_current_user()
+    if not user.is_admin:
+        # Tenant isolation: owned servers only, never the panel host itself.
+        from app.services.server_access import ServerAccess
+        from app.models.server import Server
+        owned = {sid for (sid,) in ServerAccess.scoped_servers(user).with_entities(Server.id)}
+        servers = [s for s in servers if s.get('id') in owned]
     return jsonify(servers)
 
 

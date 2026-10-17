@@ -88,6 +88,8 @@ def test_timeline_global_order_ties_and_cursor_have_no_duplicates(
         client, db_session):
     server = make_server(db_session)
     owner = make_user(db_session, role='developer')
+    server.owner_id = owner.id  # non-admins see only servers they own
+    db_session.session.commit()
     application = make_application(
         db_session, user_id=owner.id, server_id=server.id,
     )
@@ -141,6 +143,8 @@ def test_timeline_global_order_ties_and_cursor_have_no_duplicates(
 def test_timeline_type_filter_and_snapshot_attribution(client, db_session):
     server = make_server(db_session)
     owner = make_user(db_session, role='developer')
+    server.owner_id = owner.id  # non-admins see only servers they own
+    db_session.session.commit()
     application = make_application(
         db_session, user_id=owner.id, server_id=server.id, name='timeline-app',
     )
@@ -182,6 +186,8 @@ def test_app_owned_events_are_grant_filtered_before_pagination(
 
     server = make_server(db_session)
     caller = make_user(db_session, role='developer')
+    server.owner_id = caller.id  # non-admins see only servers they own
+    db_session.session.commit()
     other = make_user(db_session, role='developer')
     visible = make_application(
         db_session, user_id=other.id, server_id=server.id, name='shared',
@@ -232,6 +238,9 @@ def test_legacy_env_fallback_and_explicit_server_history(client, db_session):
     target = make_server(db_session, name='target')
     other_server = make_server(db_session, name='other')
     owner = make_user(db_session, role='developer')
+    target.owner_id = owner.id  # non-admins see only servers they own
+    other_server.owner_id = owner.id  # non-admins see only servers they own
+    db_session.session.commit()
     current = make_application(
         db_session, user_id=owner.id, server_id=target.id, name='current',
     )
@@ -266,6 +275,9 @@ def test_audit_exact_attribution_duplicate_suppression_and_safe_projection(
     server = make_server(db_session)
     other = make_server(db_session)
     developer = make_user(db_session, role='developer')
+    server.owner_id = developer.id  # non-admins see only servers they own
+    other.owner_id = developer.id  # non-admins see only servers they own
+    db_session.session.commit()
     when = datetime(2026, 8, 23, 12)
     direct = _audit(
         db_session, action='server.direct', created_at=when,
@@ -321,6 +333,9 @@ def test_timeline_rejects_invalid_query_and_mismatched_cursor(
     first_server = make_server(db_session)
     second_server = make_server(db_session)
     developer = make_user(db_session, role='developer')
+    first_server.owner_id = developer.id  # non-admins see only servers they own
+    second_server.owner_id = developer.id  # non-admins see only servers they own
+    db_session.session.commit()
     headers = headers_for(developer)
     now = datetime(2026, 8, 23, 12)
     _audit(

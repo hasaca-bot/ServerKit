@@ -108,21 +108,23 @@ def test_host_and_foreign_container_logs_denied_before_io(db_session, clients, m
 def test_server_job_and_terminal_require_operator_and_session_owner(db_session, clients, monkeypatch):
     from app.models.server import Server
     from app.services.terminal_service import TerminalService
-    server = Server(name='test', id='server-1')
-    db_session.session.add(server)
     operator = make_user(db_session, role='developer')
     viewer = make_user(db_session, role='viewer')
     other = make_user(db_session, role='developer')
+    # Only the owner (or an admin) may join a server's rooms.
+    server = Server(name='test', id='server-1', owner_id=operator.id)
+    db_session.session.add(server)
+    db_session.session.commit()
     monkeypatch.setattr(TerminalService, 'get_session', lambda sid: {
         'server_id': server.id, 'user_id': operator.id,
     } if sid == 'session-1' else None)
     for user in (operator, viewer, other):
         sock = clients(user)
         sock.emit('join_room', {'room': sk.rooms.server_channel_room(server.id, 'job:job-1')})
-        assert sock.get_received()[0]['name'] == ('error' if user == viewer else 'joined')
+        assert sock.get_received()[0]['name'] == ('joined' if user == operator else 'error')
         sk.socketio.emit('server_stream', {'channel': 'job:job-1'},
                          room=sk.rooms.server_channel_room(server.id, 'job:job-1'))
-        assert any(e['name'] == 'server_stream' for e in sock.get_received()) is (user != viewer)
+        assert any(e['name'] == 'server_stream' for e in sock.get_received()) is (user == operator)
         for event, data in [
             ('subscribe_terminal', {'session_id': 'session-1'}),
             ('join_room', {'room': sk.rooms.server_terminal_room(server.id, 'session-1')}),

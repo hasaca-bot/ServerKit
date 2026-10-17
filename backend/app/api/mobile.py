@@ -100,7 +100,9 @@ def get_mobile_summary():
     from app.models.server import Server
     from app.models.security_alert import SecurityAlert
 
-    server_count = Server.query.count()
+    from app.middleware.rbac import get_current_user
+    from app.services.server_access import ServerAccess
+    server_count = ServerAccess.scoped_servers(get_current_user()).count()
     active_alerts = SecurityAlert.query.filter_by(resolved=False).count() if hasattr(SecurityAlert, 'resolved') else 0
 
     # MonitoringService returns nested sections; a section that could not be
@@ -122,7 +124,9 @@ def get_offline_data():
     """Get data for offline caching."""
     from app.models.server import Server
 
-    servers = Server.query.limit(50).all()
+    from app.middleware.rbac import get_current_user
+    from app.services.server_access import ServerAccess
+    servers = ServerAccess.scoped_servers(get_current_user()).limit(50).all()
     return jsonify({
         'servers': [{'id': s.id, 'name': s.name, 'hostname': s.hostname, 'status': s.status} for s in servers],
         'cached_at': __import__('datetime').datetime.utcnow().isoformat(),
