@@ -178,6 +178,12 @@ def create_domain():
     if not ResourceGrantService.can_edit_app(user, app):
         raise permission_denied()
 
+    # Hosting plan: a custom domain (not under a managed base domain) counts
+    # against the app owner's plan.
+    from app.services.plan_quota_service import PlanQuotaService, is_custom_domain, quota_owner
+    if is_custom_domain(name):
+        PlanQuotaService.check(quota_owner(user, app), 'custom_domains')
+
     # For Docker apps, validate port configuration
     port_warning = None
     if app.app_type == 'docker':

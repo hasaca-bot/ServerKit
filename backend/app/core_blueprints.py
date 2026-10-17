@@ -153,6 +153,7 @@ CORE_BLUEPRINTS: tuple[BlueprintSpec, ...] = (
     BlueprintSpec('app.api.connections', 'connections_bp', '/api/v1/connections'),
     BlueprintSpec('app.api.migrations', 'migrations_bp', '/api/v1/migrations'),
     BlueprintSpec('app.api.api_keys', 'api_keys_bp', '/api/v1/api-keys'),
+    BlueprintSpec('app.api.plans', 'plans_bp', '/api/v1'),
     BlueprintSpec(
         'app.api.api_analytics',
         'api_analytics_bp',

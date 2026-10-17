@@ -2,6 +2,7 @@
 # FKs (the alternative is an IntegrityError on every parent hard-delete).
 from app.models import _delete_cascade_policy  # noqa: F401
 from app.models.user import User
+from app.models.plan import Plan
 from app.models.revoked_session import RevokedSession
 from app.models.application import Application
 from app.models.domain import Domain
@@ -95,7 +96,7 @@ from app.models.saved_view import SavedView
 from app.models.restore_point import RestorePoint
 
 __all__ = [
-    'User', 'Application', 'Domain', 'EnvironmentVariable', 'EnvironmentVariableHistory',
+    'User', 'Plan', 'Application', 'Domain', 'EnvironmentVariable', 'EnvironmentVariableHistory',
     'NotificationPreferences', 'Deployment', 'DeploymentDiff', 'DeploymentSnapshot', 'DeploymentJob', 'DeploymentJobLog', 'SystemSettings', 'AuditLog',
     'MetricsHistory', 'Workflow', 'WorkflowExecution', 'WorkflowLog', 'GitWebhook', 'WebhookLog', 'GitDeployment',
     'ErrorLog', 'HostSnapshot',

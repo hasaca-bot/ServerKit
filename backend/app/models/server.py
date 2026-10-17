@@ -170,6 +170,9 @@ class Server(TimestampMixin, JsonColumnMixin, db.Model):
     registration_token_expires = db.Column(db.DateTime)
     registered_at = db.Column(db.DateTime)
     registered_by = db.Column(db.Integer, db.ForeignKey('users.id'), index=True)
+    # Tenant owner (migration 112). Non-admins see and operate only servers
+    # they own; see app/services/server_access.py. NULL = admin-only.
+    owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
 
     # Cached capability snapshot — written every time the agent reports
     # a Capabilities message, so the panel can render the full Overview
@@ -454,6 +457,7 @@ class Server(TimestampMixin, JsonColumnMixin, db.Model):
             'ip_address': self.ip_address,
             'group_id': self.group_id,
             'workspace_id': self.workspace_id,
+            'owner_id': self.owner_id,
             'tags': self.tags or [],
             'status': self.status,
             'last_seen': self.last_seen.isoformat() if self.last_seen else None,

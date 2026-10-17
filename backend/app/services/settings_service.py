@@ -39,6 +39,11 @@ class SettingsService:
             'type': 'string',
             'description': 'Panel-default UI language (BCP-47 code) for the sign-in/setup screens and for users who have not chosen one'
         },
+        'default_plan_slug': {
+            'value': 'hobby',
+            'type': 'string',
+            'description': 'Hosting plan applied to non-admin users who have no plan assigned'
+        },
         'login_layout': {
             'value': 'centered',
             'type': 'string',

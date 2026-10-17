@@ -948,6 +948,9 @@ def create_app():
     if clash:
         raise ValidationError(clash)
 
+    from app.services.plan_quota_service import PlanQuotaService
+    PlanQuotaService.check(user, 'apps')
+
     # Stamp the workspace (#33): the requested one (membership-checked) or the default.
     from app.services.workspace_service import WorkspaceService
     ws_id = WorkspaceService.resolve_workspace_id(
@@ -985,6 +988,7 @@ def create_app():
 
     db.session.add(app)
     db.session.commit()
+    PlanQuotaService.apply_plan_to_new_app(user, app)
 
     return jsonify({
         'message': 'Service created',
@@ -1568,6 +1572,20 @@ def update_sleep_policy(app_id):
     if not _can_edit_app(user, app):
         raise permission_denied()
     data = json_object()
+    # Hosting plan: a plan with idle sleep keeps it on, at most that idle time.
+    from app.services.plan_quota_service import PlanQuotaService, QuotaExceededError, quota_owner
+    plan = PlanQuotaService.plan_for(quota_owner(user, app))
+    if plan is not None and plan.sleep_after_minutes:
+        idle = data.get('idle_timeout_minutes')
+        try:
+            too_long = idle is not None and int(idle) > plan.sleep_after_minutes
+        except (TypeError, ValueError):
+            too_long = False
+        if data.get('enabled') is False or too_long:
+            raise QuotaExceededError(
+                f'Your plan puts idle services to sleep after at most '
+                f'{plan.sleep_after_minutes} minutes.',
+                details={'kind': 'sleep', 'limit': plan.sleep_after_minutes})
     policy = ContainerSleepService.set_policy(
         app_id, enabled=data.get('enabled'), idle_timeout_minutes=data.get('idle_timeout_minutes'))
     return jsonify(policy.to_dict())
@@ -1691,12 +1709,31 @@ def update_app_resources(app_id):
 
     data = json_object()
     try:
+        cpu = memory = None
         if 'cpu_limit' in data:
-            app.cpu_limit = DockerService.validate_cpu_limit(data['cpu_limit'])
+            cpu = DockerService.validate_cpu_limit(data['cpu_limit'])
         if 'memory_limit' in data:
-            app.memory_limit = DockerService.validate_memory_limit(data['memory_limit'])
+            memory = DockerService.validate_memory_limit(data['memory_limit'])
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
+
+    # Hosting plan: per-service caps of the app owner's plan (admins exempt).
+    # Clearing a limit on a capped plan falls back to the plan's cap.
+    from app.services.plan_quota_service import PlanQuotaService, memory_to_mb, quota_owner
+    owner = quota_owner(user, app)
+    plan = PlanQuotaService.plan_for(owner)
+    if plan is not None:
+        if 'cpu_limit' in data and cpu is None and plan.max_cpu is not None:
+            cpu = f'{plan.max_cpu:g}'
+        if 'memory_limit' in data and memory is None and plan.max_memory_mb is not None:
+            memory = f'{plan.max_memory_mb}m'
+        PlanQuotaService.check_resources(
+            owner, cpu=float(cpu) if cpu is not None else None,
+            memory_mb=memory_to_mb(memory))
+    if 'cpu_limit' in data:
+        app.cpu_limit = cpu
+    if 'memory_limit' in data:
+        app.memory_limit = memory
 
     db.session.commit()
 

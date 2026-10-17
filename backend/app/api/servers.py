@@ -365,6 +365,9 @@ def create_server():
     # callers, for whom reading the JWT directly raises.
     creator = get_current_user()
     user_id = creator.id if creator else None
+    # Hosting plan: each server slot counts against the creator's plan.
+    from app.services.plan_quota_service import PlanQuotaService
+    PlanQuotaService.check(creator, 'servers')
 
     # Generate registration token
     registration_token = Server.generate_registration_token()
@@ -414,6 +417,7 @@ def create_server():
         permissions=permissions,
         allowed_ips=data.get('allowed_ips', []),
         registered_by=user_id,
+        owner_id=user_id,
         workspace_id=ws_id,
         registration_token_expires=expires_at,
     )

@@ -53,8 +53,9 @@ class TestApiKeyCallersReachTheHandlerWithAnIdentity:
         from app.models import User
         from app.models.server import Server
 
-        _, raw_key = _api_key_for(db_session, User.ROLE_DEVELOPER, 'srv-dev')
-        server = Server(name='identity-probe', hostname='10.10.10.10')
+        user, raw_key = _api_key_for(db_session, User.ROLE_DEVELOPER, 'srv-dev')
+        # Non-admins operate only servers they own.
+        server = Server(name='identity-probe', hostname='10.10.10.10', owner_id=user.id)
         db_session.session.add(server)
         db_session.session.commit()
 
@@ -112,6 +113,9 @@ class TestApiKeyCallersReachTheHandlerWithAnIdentity:
         from app.models import User
 
         user, raw_key = _api_key_for(db_session, User.ROLE_DEVELOPER, 'srv-create')
+        # The default (hobby) plan has no server slots.
+        from app.services.plan_quota_service import PlanQuotaService
+        PlanQuotaService.assign_plan(user, 'pro')
 
         response = client.post(
             '/api/v1/servers',
