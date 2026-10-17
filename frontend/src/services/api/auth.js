@@ -343,6 +343,15 @@ export async function rotateApiKey(id) {
     return this.request(`/api-keys/${id}/rotate`, { method: 'POST' });
 }
 
+// MCP: the per-user endpoint AI assistants call with an API key scoped "mcp".
+export function getMcpEndpoint() {
+    return new URL(`${this.baseUrl}/mcp`, window.location.origin).href;
+}
+
+export async function createMcpKey(name) {
+    return this.request('/api-keys/', { method: 'POST', body: { name, scopes: ['mcp'], tier: 'standard' } });
+}
+
 // Event Subscriptions (Webhooks)
 export async function getEventSubscriptions() {
     return this.request('/event-subscriptions/');

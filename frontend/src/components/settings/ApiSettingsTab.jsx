@@ -4,6 +4,7 @@ import api from '../../services/api';
 import useSettingFocus from '../../hooks/useSettingFocus';
 import ApiKeyModal from './ApiKeyModal';
 import WebhookSubscriptionModal from './WebhookSubscriptionModal';
+import McpSettingsCard from './McpSettingsCard';
 import {
     Key, Plus, Trash2, RotateCcw, Activity, AlertCircle,
     Check, Send, ChevronDown, ChevronUp, Zap, BarChart3, RefreshCw
@@ -31,6 +32,7 @@ const ApiSettingsTab = () => {
     return (
         <div className="api-settings">
             <ApiKeysSection />
+            <McpSettingsCard />
             {isAdmin && <RateLimitsSection />}
             <WebhookSection />
             {isAdmin && <AnalyticsSection />}
