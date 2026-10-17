@@ -1,0 +1,6 @@
+# Owner-specific: site recipes, local logs and helpers stay out of git
+*/
+!.gitignore
+*.log
+*.bat
+__pycache__/

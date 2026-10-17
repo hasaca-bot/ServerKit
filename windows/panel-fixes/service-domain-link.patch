@@ -1,0 +1,26 @@
+diff --git a/frontend/src/pages/ServiceDetail.jsx b/frontend/src/pages/ServiceDetail.jsx
+index 00b72012..766dbec2 100644
+--- a/frontend/src/pages/ServiceDetail.jsx
++++ b/frontend/src/pages/ServiceDetail.jsx
+@@ -273,7 +273,11 @@ const ServiceDetail = () => {
+     const isUpload = service.source === 'upload';
+     const isManual = service.source === 'manual';
+     const domains = service.domains || [];
+-    const primaryDomain = (domains.find(d => d.is_primary) || domains[0])?.name || '';
++    const primaryDomainRow = domains.find(d => d.is_primary) || domains[0];
++    const primaryDomain = primaryDomainRow?.name || '';
++    // https only when the domain actually has a certificate; a plain-http
++    // domain linked as https:// just fails to connect.
++    const primaryDomainUrl = `${primaryDomainRow?.ssl_enabled ? 'https' : 'http'}://${primaryDomain}`;
+     // Only when there is no domain in front of it — otherwise the domain
+     // link above is the one to follow.
+     const openUrl = primaryDomain ? null : servicePortUrl(service);
+@@ -465,7 +469,7 @@ const ServiceDetail = () => {
+                             <>
+                                 <span className="separator">&middot;</span>
+                                 <a
+-                                    href={`https://${primaryDomain}`}
++                                    href={primaryDomainUrl}
+                                     target="_blank"
+                                     rel="noopener noreferrer"
+                                 >

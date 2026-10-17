@@ -1,0 +1,146 @@
+SERVERKIT ON WINDOWS — HANDOFF / CONTINUATION NOTES
+====================================================
+(TR: Bu dosya, bu çatalda kaldığın yerden kesintisiz devam etmek için yazıldı. Bir yapay
+zekâya "HANDOFF.txt'yi oku ve devam et" demen yeterli. İçinde hiçbir şifre/anahtar yok.)
+
+Repository : https://github.com/hasaca-bot/ServerKit  (public fork of jhd3197/ServerKit, MIT)
+Upstream   : ServerKit v1.11.20 (Flask + React server control panel, Linux-only by design)
+State date : 2026-10-17
+Goal ahead : turn this into a community "Render-like" self-hosting app: push a GitHub repo,
+             get https://<name>.<your-domain> with databases, env, logs, cron, auto-deploy,
+             and an MCP server so AI assistants can deploy for you.
+
+----------------------------------------------------------------------------------------
+1. WHAT EXISTS NOW (all verified end to end on the owner's PC)
+----------------------------------------------------------------------------------------
+- ServerKit runs UNCHANGED inside a dedicated WSL2 distro "ServerKit" (Ubuntu 24.04,
+  systemd), installed by the upstream install.sh. Nothing in backend/ or frontend/ is
+  forked except one UI patch (see 6). Reason: the panel drives nginx/systemd/ufw/fail2ban/
+  docker directly; only a real Linux host gives zero feature loss.
+- Windows launcher: ServerKit.bat -> windows/ServerKit.ps1 (install, start, stop, status,
+  update, theme, autostart/watchdog, remote link, sync, gateway commands). Linux side:
+  windows/wsl-setup.sh.
+- Watchdog: scheduled task "ServerKit Watchdog" (logon, network reconnect, every 2 min)
+  restarts the distro if the panel stops answering. A hidden keep-alive wsl.exe session
+  stops WSL from idling the distro out.
+- Sites: windows/sites/publish.py publishes a git repo as a panel service:
+  local read-only mirror /srv/git/<repo>.git (git daemon on 127.0.0.1:9418,
+  unit serverkit-git-local) -> overlay.sh adds a Dockerfile on a local-only "serverkit"
+  branch -> panel API (create service, env, volumes, domain) -> redeploy -> health check.
+  Recipes are windows/sites/<site>/{Dockerfile,site.json} (owner's recipes are NOT in git).
+  mirror.sh refreshes a mirror from a local working copy ("source" in site.json).
+- Public HTTPS: one named Cloudflare Tunnel (cloudflared in the distro, config
+  /etc/cloudflared/<tunnel>.yml, unit serverkit-tunnel-<tunnel>) carries every hostname;
+  windows/domain-tunnel.sh up|add|remove|status creates the DNS records itself.
+  Free Cloudflare cert covers apex + one subdomain level. Quick tunnels (trycloudflare):
+  windows/remote-link.sh (panel) and windows/site-link.sh (a site) — random addresses.
+- Auto-deploy from GitHub: windows/sites/sync.py + scheduled task "ServerKit Site Sync"
+  (every 3 min). The panel's per-service "Auto deploy" switch is the on/off; it fetches
+  with the Windows git credentials (no token on the server).
+- Publish gateway + MCP server: windows/gateway/gateway.py (python3 stdlib, unit
+  serverkit-gateway, 127.0.0.1:8711, public at https://deploy.<domain>):
+    REST: GET / (instructions), GET /v1/sites, POST /v1/publish, GET /v1/jobs/<id>,
+          GET /v1/sites/<site>, POST /v1/sites/<site>/<action>
+    MCP:  POST /mcp (Streamable HTTP, JSON responses), key as "Authorization: Bearer <key>"
+          or in the path /mcp/<key> (claude.ai custom connectors cannot send headers;
+          the key is masked in the access log).
+    17 tools: get_instructions, list_sites, publish_site, get_job, site_info, set_env,
+          get_logs, redeploy_site, stop_site, start_site, create_database,
+          delete_database, list_cron, add_cron, delete_cron, run_command, delete_site.
+  Windows-side worker: windows/gateway/remote_ops.py (+ remote_publish.py), run through
+  WSL interop as the owner's Windows user (git credentials + saved panel session).
+  Ownership rule: only sites whose site.json has "origin": "gateway" are controllable;
+  names of containers/volumes/images are derived from the app id, never from input.
+  Databases: panel "database engines" (postgresql/mysql/mariadb/redis) as containers
+  "<site>-<engine>"; windows/gateway/netlink.sh (unit serverkit-netlink) keeps the site
+  and its database on docker network serverkit-services after every redeploy.
+  cron/run_command run only inside the site's own container (docker exec, strict argv).
+  Limits: 2 DBs/site, 10 cron jobs/site (>= 5 min), 30 req/min/IP, 10 bad keys/IP/10 min.
+  Key: /etc/serverkit-gateway/token (root 0600); rotate with ServerKit.bat gateway-rotate.
+- Panel extension: builtin-extensions/serverkit-remote-publish (admin-only API
+  /api/v1/remote-publish): Settings -> Admin -> API card (gateway status, addresses, key
+  reveal/rotate, ready-made Claude Code command + MCP JSON, auto-deploy switch per
+  service) and an "Auto deploy" switch on every service page. Uses the panel's own
+  widget slots settings.section and service.detail.tab — no core edits. Its frontend must
+  be compiled into the panel bundle (see 6).
+- Theme: windows/themes/mono-square.json (flat black/white, square corners), applied with
+  ServerKit.ps1 theme (panel theme service, data only).
+- Automatic knowledge notes: windows/brain/note.py (Stop hook ~/.claude/hooks/
+  serverkit-note.sh + scheduled task "ServerKit Brain Notes") sends changes to a headless
+  Haiku agent that writes them into the owner's private vault. Owner-specific; optional.
+
+----------------------------------------------------------------------------------------
+2. RUNTIME LOCATIONS (inside the distro)
+----------------------------------------------------------------------------------------
+/opt/serverkit -> /opt/serverkit-a (panel), .env there; frontend/dist (+ dist.orig backup)
+/srv/git/*.git (mirrors)  /etc/cloudflared/  /root/.cloudflared/ (tunnel cert+creds)
+/etc/serverkit-gateway/{token,netlinks}  /usr/local/sbin/serverkit-{domain-tunnel,
+remote-link,site-link,netlink}  units: serverkit, nginx, docker, serverkit-git-local,
+serverkit-tunnel-*, serverkit-remote, serverkit-site-*, serverkit-gateway, serverkit-netlink
+Windows: %LOCALAPPDATA%\ServerKit\ (watchdog.log, sync.log, repos\ cache, brain\)
+
+----------------------------------------------------------------------------------------
+3. GOTCHAS LEARNED THE HARD WAY
+----------------------------------------------------------------------------------------
+- NEVER restart the panel (systemctl restart serverkit) while deployment jobs are queued:
+  they are lost and stay "pending" forever (publish.py now only waits for its own jobs).
+- Panel start/stop/restart fail for plain single-container apps ("no configuration file
+  provided") -> use /apps/<id>/sleep and /wake. Panel DELETE ?purge=true leaves the
+  container, volumes and images behind; remote_ops delete_site cleans them up itself.
+- The panel imports env vars from a repo's render.yaml on creation (Render-only paths
+  like /var/data break apps) -> override in site.json.
+- Windows resolves localhost to ::1: panel vhost needs "listen [::]:80 default_server"
+  (wsl-setup.sh panel-ipv6, re-applied by ServerKit.bat update).
+- `serverkit update` replaces frontend/dist: re-apply windows/panel-fixes/*.patch and
+  rebuild with the extension (see 6); wsl-setup.sh ai-extras re-adds the Gemini driver.
+- Cloudflare answers 403 to Python's default urllib User-Agent; send a browser-like UA.
+- claude.cmd cuts a multi-line command-line argument at the first newline: pass prompts
+  to `claude -p` on stdin.
+- In Git Bash: set MSYS_NO_PATHCONV=1 before wsl.exe calls with /paths; heredocs collapse
+  double backslashes (write such files with an editor, not a heredoc).
+
+----------------------------------------------------------------------------------------
+4. OWNER-SPECIFIC VALUES TO GENERALISE (first job for a community release)
+----------------------------------------------------------------------------------------
+Hard-coded today; move into ONE config file (e.g. windows/serverkit-windows.json) read by
+every script, with an install wizard that fills it:
+- Windows paths C:\Users\hasan_y4hfwna\... (gateway.py WIN_PYTHON/WIN_SCRIPT/SITES_DIR,
+  remote_ops.py, publish.py, sync.py, note.py, skill path) -> %USERPROFILE% / repo-relative.
+- Domain "tadadigital.shop", gateway host "deploy.", tunnel name "tada" (gateway.py,
+  remote_ops.py, publish.py TUNNEL, domain-tunnel calls, PROMPT-TEMPLATE.txt, extension).
+- GitHub owner "hasaca-bot" (gateway validate(): repo must be "hasaca-bot/<repo>").
+- Port range 4100-4999, reserved names, limits.
+- Python path (Python313) for interop.
+
+----------------------------------------------------------------------------------------
+5. ROADMAP IDEAS FOR THE "RENDER-LIKE" COMMUNITY VERSION
+----------------------------------------------------------------------------------------
+1. Config file + guided installer (WSL, Cloudflare login, domain, first admin).
+2. Multi-user gateway keys (per-user key, quotas, audit), instead of one shared key.
+3. GitHub App / webhooks instead of 3-minute polling; private repos via deploy keys.
+4. Per-site resource limits (PUT /apps/<id>/resources) and a free-tier policy.
+5. Native Linux host support for the same pipeline (drop the Windows-only parts:
+   keep-alive, watchdog, interop) — most of it already runs inside Linux.
+6. Upstream PRs to jhd3197/ServerKit: ServiceDetail https/http domain link,
+   needs_shared_network for DB-only apps, start/stop for single-container apps,
+   full cleanup on delete, IPv6 default_server.
+7. Docs site + screenshots; keep MIT license and upstream attribution.
+
+----------------------------------------------------------------------------------------
+6. HOW TO REBUILD THE PANEL UI WITH THE EXTENSION + PATCH
+----------------------------------------------------------------------------------------
+git worktree add --detach ../sk-ui v1.11.20 ; apply windows/panel-fixes/*.patch ;
+copy builtin-extensions/serverkit-remote-publish/frontend -> frontend/src/plugins/
+serverkit-remote-publish ; cd frontend && npm ci && npm run build ; copy dist into
+/opt/serverkit/frontend/dist (keep the installed favicon.ico/svg) ; copy the extension to
+/opt/serverkit/builtin-extensions/ and POST /api/v1/plugins/builtin/
+serverkit-remote-publish/install.
+
+----------------------------------------------------------------------------------------
+7. NOT IN THIS REPO (on purpose)
+----------------------------------------------------------------------------------------
+- The owner's site recipes (windows/sites/<site>/) — personal infrastructure.
+- Any key, token, password, .env, Cloudflare credential.
+- windows/_old-native-attempt (an abandoned native-Windows experiment).
+- The private knowledge vault (HASACA-beyin, 10_PROJELER/serverkit-windows) — the
+  owner's detailed history lives there.

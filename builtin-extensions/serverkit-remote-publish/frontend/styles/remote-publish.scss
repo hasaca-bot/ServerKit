@@ -1,0 +1,126 @@
+// Remote Publish & MCP — settings card and per-service switch.
+// Only theme tokens, so any panel theme (incl. square/flat ones) applies.
+
+.remote-publish {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 16px;
+
+    &--service {
+        margin: 16px 0 0;
+    }
+
+    &__row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+
+        > span:first-child {
+            min-width: 140px;
+            color: var(--text-dim);
+        }
+    }
+
+    &__field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 16px;
+
+        > span:first-child {
+            color: var(--text-dim);
+            font-size: 0.85rem;
+        }
+    }
+
+    &__actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    &__muted {
+        color: var(--text-faint);
+        font-size: 0.85rem;
+        margin: 0;
+    }
+
+    &__error {
+        color: var(--red);
+        margin: 0 0 12px;
+    }
+
+    &__code {
+        margin: 0;
+        padding: 12px;
+        overflow-x: auto;
+        background: var(--bg-code);
+        color: var(--text-code);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm, 6px);
+        font-family: var(--mono, monospace);
+        font-size: 0.8rem;
+    }
+
+    &__table {
+        width: 100%;
+        border-collapse: collapse;
+
+        th,
+        td {
+            text-align: left;
+            padding: 10px 8px;
+            border-bottom: 1px solid var(--border-soft);
+        }
+
+        th {
+            color: var(--text-dim);
+            font-weight: 500;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        a {
+            color: var(--text);
+        }
+    }
+
+    &__switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+
+        &--compact span {
+            font-size: 0.85rem;
+        }
+    }
+
+    &__service {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding-top: 16px;
+
+        p {
+            margin: 4px 0 0;
+        }
+    }
+
+    @media (max-width: 640px) {
+        &__row {
+            flex-wrap: wrap;
+        }
+
+        &__table {
+            th:nth-child(2),
+            td:nth-child(2) {
+                display: none;
+            }
+        }
+    }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "serverkit-remote-publish",
+  "display_name": "Remote Publish & MCP",
+  "version": "1.0.0",
+  "description": "Lets AI assistants that are not on this server publish sites through an MCP server and REST gateway (bearer key), and adds per-service auto-deploy switches.",
+  "author": "hasan",
+  "license": "MIT",
+  "category": "deployment",
+  "permissions": ["shell"],
+  "entry_point": "remote_publish:remote_publish_bp",
+  "url_prefix": "/api/v1/remote-publish",
+  "icon": "<path d=\"M12 2v13\"/><path d=\"m7 10 5 5 5-5\"/><path d=\"M5 21h14\"/>",
+  "contributions": {
+    "widgets": [
+      { "slot": "settings.section", "component": "RemotePublishSettings" },
+      { "slot": "service.detail.tab", "component": "ServiceAutoDeploy" }
+    ],
+    "command_palette": [
+      {
+        "label": "Remote publish & MCP",
+        "path": "/settings?tab=api",
+        "category": "Settings",
+        "keywords": "mcp gateway deploy publish auto-deploy token ai"
+      }
+    ]
+  }
+}

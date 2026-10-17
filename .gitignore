@@ -230,3 +230,7 @@ scripts/keys/
 
 # Local/CI browser regression screenshots
 frontend/test-results/
+
+# Windows port (windows/): local-only artefacts
+windows/_old-native-attempt/
+windows/**/__pycache__/
