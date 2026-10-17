@@ -23,7 +23,21 @@ remote_publish_bp = Blueprint('remote_publish', __name__)
 
 UNIT = 'serverkit-gateway'
 TOKEN_FILE = '/etc/serverkit-gateway/token'
-PUBLIC_URL = os.environ.get('SERVERKIT_GATEWAY_URL', 'https://deploy.tadadigital.shop')
+PUBLIC_URL_FILE = '/etc/serverkit-gateway/public_url'  # written by windows/gateway/install.sh
+
+
+def _public_url():
+    """Public gateway address: $SERVERKIT_GATEWAY_URL, else the file install.sh writes
+    from the config's domain + gateway label; empty until the gateway is installed."""
+    url = os.environ.get('SERVERKIT_GATEWAY_URL', '')
+    if not url:
+        try:
+            with open(PUBLIC_URL_FILE, encoding='utf-8') as f:
+                url = f.read().strip()
+        except OSError:
+            url = ''
+    return url.rstrip('/')
+
 
 
 def _systemctl(*args):
@@ -59,8 +73,8 @@ def status():
         'installed': _installed(),
         'active': _systemctl('is-active', UNIT).stdout.strip() == 'active',
         'enabled': _systemctl('is-enabled', UNIT).stdout.strip() == 'enabled',
-        'url': PUBLIC_URL,
-        'mcp_url': f'{PUBLIC_URL}/mcp',
+        'url': _public_url(),
+        'mcp_url': f'{_public_url()}/mcp',
         'token_set': bool(token),
         'token_hint': f'{token[:4]}…' if token else None,
     })

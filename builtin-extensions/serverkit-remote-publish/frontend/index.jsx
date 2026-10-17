@@ -153,8 +153,8 @@ export function RemotePublishSettings({ context }) {
                 <CardHeader>
                     <CardTitle>{L('Uzaktan yayın ve MCP', 'Remote publish & MCP')}</CardTitle>
                     <CardDescription>
-                        {L('Bu sunucuda olmayan yapay zekâlar (bulut oturumları, başka bilgisayarlar) bu bağlantı anahtarıyla GitHub depolarını https://<ad>.tadadigital.shop olarak yayınlayabilir. Mevcut sitelere ve panele dokunamazlar; silme yetkileri yoktur.',
-                            'AI assistants that are not on this server can publish GitHub repositories as https://<name>.tadadigital.shop with this key. They cannot touch existing sites or the panel, and cannot delete anything.')}
+                        {L('Bu sunucuda olmayan yapay zekâlar (bulut oturumları, başka bilgisayarlar) bu bağlantı anahtarıyla GitHub depolarını https://<ad>.<alan-adiniz> olarak yayınlayabilir. Mevcut sitelere ve panele dokunamazlar; silme yetkileri yoktur.',
+                            'AI assistants that are not on this server can publish GitHub repositories as https://<name>.<your-domain> with this key. They cannot touch existing sites or the panel, and cannot delete anything.')}
                     </CardDescription>
                 </CardHeader>
                 <CardContent>

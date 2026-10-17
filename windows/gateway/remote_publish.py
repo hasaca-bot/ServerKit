@@ -18,8 +18,12 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+import swk_config  # noqa: E402
+
+CFG = swk_config.load()
 SITES = os.path.join(os.path.dirname(HERE), 'sites')
-DOMAIN = 'tadadigital.shop'
+DOMAIN = CFG.domain
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
 sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
@@ -102,6 +106,7 @@ def main(spec=None):
         'host': f'{name}.localhost',
         'public_host': f'{name}.{DOMAIN}',
         'health': spec.get('health', '/'),
+        'auto_deploy': bool(spec.get('auto_deploy', False)),
         'volumes': [{'name': f'{name}-{i + 1}', 'mount_path': p} for i, p in enumerate(spec.get('volumes', []))],
         'env': spec.get('env', {}),
     }
@@ -122,7 +127,9 @@ def main(spec=None):
     if proc.wait() != 0:
         fail('publish.py failed (see above)')
 
-    # 4. Auto-deploy switch on the panel service.
+    # 4. Auto-deploy switch on the panel service (publish.py already registered the core
+    #    GitHub webhook when auto_deploy_mode is "webhook"; this is the per-service switch
+    #    that the poll fallback and the webhook's pre-deploy gate both read).
     app = next((a for a in publish.must('GET', '/apps').get('apps', []) if a['name'] == name), None)
     if app is None:
         fail('service not found after publishing')

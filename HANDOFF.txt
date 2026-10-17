@@ -5,7 +5,7 @@ zekâya "HANDOFF.txt'yi oku ve devam et" demen yeterli. İçinde hiçbir şifre/
 
 Repository : https://github.com/hasaca-bot/ServerKit  (public fork of jhd3197/ServerKit, MIT)
 Upstream   : ServerKit v1.11.20 (Flask + React server control panel, Linux-only by design)
-State date : 2026-10-17
+State date : 2026-10-17 (package D applied: config file, core webhooks, wildcard tunnel, gateway modes)
 Goal ahead : turn this into a community "Render-like" self-hosting app: push a GitHub repo,
              get https://<name>.<your-domain> with databases, env, logs, cron, auto-deploy,
              and an MCP server so AI assistants can deploy for you.
@@ -17,6 +17,13 @@ Goal ahead : turn this into a community "Render-like" self-hosting app: push a G
   systemd), installed by the upstream install.sh. Nothing in backend/ or frontend/ is
   forked except one UI patch (see 6). Reason: the panel drives nginx/systemd/ufw/fail2ban/
   docker directly; only a real Linux host gives zero feature loss.
+- ONE CONFIG FILE: windows/serverkit-windows.json (gitignored; template
+  windows/serverkit-windows.example.json) holds every owner-specific value: Windows
+  profile/repo/python paths, base domain + gateway/panel labels, tunnel name and wildcard
+  switch, GitHub owner allowlist, port range, reserved names, limits, panel URLs,
+  auto_deploy_mode, gateway.mode. Readers: windows/swk_config.py (all Python),
+  windows/lib/config.sh (shell, `swk_cfg domain`), ServerKit.ps1 (Get-SwkConfig).
+  Missing file -> clear "copy the example" error. See windows/README.md "Configuration".
 - Windows launcher: ServerKit.bat -> windows/ServerKit.ps1 (install, start, stop, status,
   update, theme, autostart/watchdog, remote link, sync, gateway commands). Linux side:
   windows/wsl-setup.sh.
@@ -32,11 +39,20 @@ Goal ahead : turn this into a community "Render-like" self-hosting app: push a G
 - Public HTTPS: one named Cloudflare Tunnel (cloudflared in the distro, config
   /etc/cloudflared/<tunnel>.yml, unit serverkit-tunnel-<tunnel>) carries every hostname;
   windows/domain-tunnel.sh up|add|remove|status creates the DNS records itself.
-  Free Cloudflare cert covers apex + one subdomain level. Quick tunnels (trycloudflare):
+  `domain-tunnel.sh wildcard <domain>` (config tunnel.wildcard=true) routes *.<domain> to
+  local nginx once (one ingress rule + one wildcard CNAME); publish then adds no per-site
+  DNS/ingress. Free Cloudflare cert covers apex + one subdomain level. Quick tunnels (trycloudflare):
   windows/remote-link.sh (panel) and windows/site-link.sh (a site) — random addresses.
-- Auto-deploy from GitHub: windows/sites/sync.py + scheduled task "ServerKit Site Sync"
-  (every 3 min). The panel's per-service "Auto deploy" switch is the on/off; it fetches
-  with the Windows git credentials (no token on the server).
+- Auto-deploy from GitHub, default auto_deploy_mode "webhook": publish.py (windows/sites/
+  autodeploy.py) creates the panel's CORE webhook for the service (POST /api/v1/git/webhooks,
+  per-app record, receive URL <panel.public_url>/api/v1/git/webhooks/receive/<token>) and
+  registers it on GitHub with the user's gh/git credential (else prints the exact steps).
+  The webhook's pre-deploy script runs `sync.py --refresh <site>` on Windows (WSL interop):
+  GitHub -> cache -> mirror -> overlay, then the panel pulls and redeploys; it also honours
+  the per-service "Auto deploy" switch. Fallback "poll": sync.py + scheduled task
+  "ServerKit Site Sync" (every 3 min, ServerKit.bat sync-on). NOT yet verified end to end on
+  the owner's PC: the webhook path (needs panel.public_url reachable; a push must produce a
+  deployment in the panel).
 - Publish gateway + MCP server: windows/gateway/gateway.py (python3 stdlib, unit
   serverkit-gateway, 127.0.0.1:8711, public at https://deploy.<domain>):
     REST: GET / (instructions), GET /v1/sites, POST /v1/publish, GET /v1/jobs/<id>,
@@ -47,6 +63,10 @@ Goal ahead : turn this into a community "Render-like" self-hosting app: push a G
     17 tools: get_instructions, list_sites, publish_site, get_job, site_info, set_env,
           get_logs, redeploy_site, stop_site, start_site, create_database,
           delete_database, list_cron, add_cron, delete_cron, run_command, delete_site.
+  gateway.mode "local" (default) = everything above. gateway.mode "core": POST /mcp and
+  /mcp/<key> are reverse-proxied unchanged to the panel's per-user MCP endpoint
+  http://127.0.0.1:<panel.port>/api/v1/mcp (and /api/v1/mcp/k/<key>) once that endpoint
+  exists in the panel; REST stays local. The 17 tools above remain in local mode.
   Windows-side worker: windows/gateway/remote_ops.py (+ remote_publish.py), run through
   WSL interop as the owner's Windows user (git credentials + saved panel session).
   Ownership rule: only sites whose site.json has "origin": "gateway" are controllable;
@@ -55,7 +75,8 @@ Goal ahead : turn this into a community "Render-like" self-hosting app: push a G
   "<site>-<engine>"; windows/gateway/netlink.sh (unit serverkit-netlink) keeps the site
   and its database on docker network serverkit-services after every redeploy.
   cron/run_command run only inside the site's own container (docker exec, strict argv).
-  Limits: 2 DBs/site, 10 cron jobs/site (>= 5 min), 30 req/min/IP, 10 bad keys/IP/10 min.
+  Limits (config limits.*, defaults): 2 DBs/site, 10 cron jobs/site (>= 5 min), 30 req/min/IP,
+  10 bad keys/IP/10 min.
   Key: /etc/serverkit-gateway/token (root 0600); rotate with ServerKit.bat gateway-rotate.
 - Panel extension: builtin-extensions/serverkit-remote-publish (admin-only API
   /api/v1/remote-publish): Settings -> Admin -> API card (gateway status, addresses, key
@@ -100,24 +121,33 @@ Windows: %LOCALAPPDATA%\ServerKit\ (watchdog.log, sync.log, repos\ cache, brain\
   double backslashes (write such files with an editor, not a heredoc).
 
 ----------------------------------------------------------------------------------------
-4. OWNER-SPECIFIC VALUES TO GENERALISE (first job for a community release)
+4. OWNER-SPECIFIC VALUES (DONE: moved into windows/serverkit-windows.json)
 ----------------------------------------------------------------------------------------
-Hard-coded today; move into ONE config file (e.g. windows/serverkit-windows.json) read by
-every script, with an install wizard that fills it:
-- Windows paths C:\Users\hasan_y4hfwna\... (gateway.py WIN_PYTHON/WIN_SCRIPT/SITES_DIR,
-  remote_ops.py, publish.py, sync.py, note.py, skill path) -> %USERPROFILE% / repo-relative.
-- Domain "tadadigital.shop", gateway host "deploy.", tunnel name "tada" (gateway.py,
-  remote_ops.py, publish.py TUNNEL, domain-tunnel calls, PROMPT-TEMPLATE.txt, extension).
-- GitHub owner "hasaca-bot" (gateway validate(): repo must be "hasaca-bot/<repo>").
-- Port range 4100-4999, reserved names, limits.
-- Python path (Python313) for interop.
+Everything that used to be hard-coded now comes from the config file (see section 1):
+- Windows paths (C:\Users\<you>\..., python, repo root, state dir, skctl, notes vault).
+- Domain, gateway/panel host labels, tunnel name, wildcard switch (gateway.py, remote_ops.py,
+  remote_publish.py, publish.py, install.sh, PROMPT-TEMPLATE.txt placeholders, the
+  serverkit-remote-publish extension reads /etc/serverkit-gateway/public_url that install.sh
+  writes).
+- GitHub owner allowlist (config github.owners), port range, reserved names, limits.
+TO DO ON YOUR PC after pulling this: copy windows\serverkit-windows.example.json to
+windows\serverkit-windows.json and put your old values in (user profile, repo root, python,
+domain tadadigital.shop, tunnel "tada", owner hasaca-bot, ports 4100-4999, reserved names
+incl. "tada"); run ServerKit.bat gateway-on to reinstall the gateway unit (it now gets
+SERVERKIT_WINDOWS_CONFIG and swk_config.py).
+Still not generalised: the Turkish console messages in ServerKit.ps1 and the install wizard
+(item 1 of section 5).
 
 ----------------------------------------------------------------------------------------
 5. ROADMAP IDEAS FOR THE "RENDER-LIKE" COMMUNITY VERSION
 ----------------------------------------------------------------------------------------
-1. Config file + guided installer (WSL, Cloudflare login, domain, first admin).
+1. Config file DONE; still to do: guided installer (WSL, Cloudflare login, domain, first
+   admin) that writes windows/serverkit-windows.json.
 2. Multi-user gateway keys (per-user key, quotas, audit), instead of one shared key.
-3. GitHub App / webhooks instead of 3-minute polling; private repos via deploy keys.
+   -> panel core MCP endpoint + tenancy (docs/HOSTING-ROADMAP.md, packages A/B); the gateway
+   already has mode "core" to hand MCP over to it.
+3. Core webhooks instead of 3-minute polling DONE (auto_deploy_mode "webhook"); still to do:
+   GitHub App installation based registration, private repos via deploy keys.
 4. Per-site resource limits (PUT /apps/<id>/resources) and a free-tier policy.
 5. Native Linux host support for the same pipeline (drop the Windows-only parts:
    keep-alive, watchdog, interop) — most of it already runs inside Linux.

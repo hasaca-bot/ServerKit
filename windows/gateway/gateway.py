@@ -3,7 +3,15 @@
 
 Runs inside the ServerKit WSL distro (systemd unit serverkit-gateway), listens
 on 127.0.0.1 only, and is reached from the internet through the Cloudflare
-tunnel at https://deploy.tadadigital.shop. Standard library only.
+tunnel at https://<gateway_label>.<domain> (windows/serverkit-windows.json).
+Standard library only.
+
+Two modes ("gateway.mode" in that file):
+  local  (default) this file answers MCP itself with its 17 tools.
+  core   POST /mcp and /mcp/<key> are reverse-proxied unchanged to the panel's own
+         per-user MCP endpoint (http://127.0.0.1:<panel.port>/api/v1/mcp and
+         /api/v1/mcp/k/<key>); the client's key is the panel API key. The REST
+         endpoints below stay local in both modes.
 
 What a caller can do (with the bearer token, nothing without it), for the sites
 that were created through this gateway:
@@ -22,7 +30,7 @@ Deliberately NOT possible: touching sites that were not created through this
 gateway (the owner's existing sites, the panel, users, firewall), a shell on
 the host (commands run only inside the site's own container), using
 repositories outside the allowed GitHub owner, choosing hostnames outside
-<name>.tadadigital.shop, mounting host paths, or running two jobs at once.
+<name>.<domain>, mounting host paths, or running two jobs at once.
 
 The actual work is done on the Windows side by remote_ops.py (Windows Python,
 started through WSL interop), which reuses publish.py / sync.py: the Windows
@@ -31,6 +39,7 @@ saved session. No GitHub token and no panel password live here. Every
 ownership check is done here AND again in remote_ops.py.
 """
 import hmac
+import http.client
 import http.server
 import json
 import os
@@ -38,35 +47,50 @@ import queue
 import re
 import secrets
 import subprocess
+import sys
 import threading
 import time
 import uuid
 
-LISTEN = ('127.0.0.1', int(os.environ.get('GATEWAY_PORT', '8711')))
+# swk_config.py sits next to this file when installed (/usr/local/lib/serverkit-gateway)
+# and one directory up in the repository (windows/gateway/gateway.py).
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path[:0] = [_HERE, os.path.dirname(_HERE)]
+import swk_config  # noqa: E402
+
+CFG = swk_config.load()
+LISTEN = ('127.0.0.1', CFG.gateway_port)
 TOKEN_FILE = '/etc/serverkit-gateway/token'
-WIN_PYTHON = os.environ.get(
-    'GATEWAY_WIN_PYTHON',
-    '/mnt/c/Users/hasan_y4hfwna/AppData/Local/Programs/Python/Python313/python.exe')
-WIN_SCRIPT = os.environ.get(
-    'GATEWAY_WIN_SCRIPT',
-    r'C:\Users\hasan_y4hfwna\Desktop\ServerKit\windows\gateway\remote_ops.py')
-SITES_DIR = '/mnt/c/Users/hasan_y4hfwna/Desktop/ServerKit/windows/sites'
-DOMAIN = 'tadadigital.shop'
+WIN_PYTHON = os.environ.get('GATEWAY_WIN_PYTHON') or CFG.python_wsl
+WIN_SCRIPT = os.environ.get('GATEWAY_WIN_SCRIPT') or (CFG.repo_root_windows.rstrip('\\') + r'\windows\gateway\remote_ops.py')
+SITES_DIR = CFG.sites_dir
+DOMAIN = CFG.domain
+GATEWAY_HOST = CFG.gateway_host
+MODE = CFG.gateway_mode
+CORE_HOST, CORE_PORT = '127.0.0.1', CFG.panel_port
+OWNERS = CFG.owners
+PORT_MIN, PORT_MAX = CFG.port_min, CFG.port_max
 MAX_BODY = 256 * 1024
 JOB_TIMEOUT = 3600
 SYNC_TIMEOUT = 90
 MAX_SYNC = 3
-RATE_LIMIT = 30          # authenticated requests per minute per IP
+LIMITS = CFG.limits
+RATE_LIMIT = LIMITS['rate_per_minute']          # authenticated requests per minute per IP
+BAD_KEY_LIMIT = LIMITS['bad_key_limit']         # bad keys per IP ...
+BAD_KEY_WINDOW = LIMITS['bad_key_window_minutes'] * 60   # ... per this many seconds
+MAX_CRON = LIMITS['cron_per_site']
+MIN_CRON_INTERVAL = LIMITS['cron_min_interval_minutes']
+OWNER_RE = re.compile(r'^(?:' + '|'.join(re.escape(o) for o in OWNERS) + r')/[A-Za-z0-9._-]{1,100}$')
+OWNER_TEXT = ' or '.join(f'"{o}/<repo>"' for o in OWNERS)
 
 NAME_RE = re.compile(r'^[a-z][a-z0-9-]{1,30}[a-z0-9]$')
-RESERVED = {'www', 'panel', 'deploy', 'api', 'admin', 'mail', 'smtp', 'ftp', 'root',
-            'tada', 'app', 'status', 'cdn', 'static', 'ns1', 'ns2'}
+RESERVED = CFG.reserved
 ENV_KEY_RE = re.compile(r'^[A-Z][A-Z0-9_]{0,63}$')
 ARGV_TOKEN_RE = re.compile(r'^[A-Za-z0-9_./:=@,+%-]{1,200}$')
 CRON_FIELD_RE = re.compile(r'^[0-9*/,-]{1,20}$')
 ENGINES = ('postgresql', 'mysql', 'mariadb', 'redis')
 GENERATORS = ('hex32', 'password', 'fernet')
-MAX_ENGINES_PER_SITE = 2
+MAX_ENGINES_PER_SITE = LIMITS['databases_per_site']
 
 # action -> True when it runs as a queued job (poll get_job), False when answered directly
 ACTIONS = {
@@ -89,16 +113,16 @@ def load_token():
         return f.read().strip()
 
 
-HELP = f"""ServerKit publish gateway — https://deploy.{DOMAIN}
+HELP = f"""ServerKit publish gateway — https://{GATEWAY_HOST}
 
-MCP: this server is also an MCP server at https://deploy.{DOMAIN}/mcp
-(Streamable HTTP, same Bearer header). Tools: get_instructions, list_sites,
+MCP: this server is also an MCP server at https://{GATEWAY_HOST}/mcp
+(Streamable HTTP, same Bearer header{'; mode core: answered by the panel with your own panel API key' if MODE == 'core' else ''}). Tools: get_instructions, list_sites,
 publish_site, get_job, site_info, set_env, get_logs, redeploy_site, stop_site,
 start_site, create_database, delete_database, list_cron, add_cron, delete_cron,
 run_command, delete_site. The REST calls below do the same.
 
 You can publish a web app that lives in a GitHub repository of the owner
-(github.com/hasaca-bot/...) onto the owner's server and then run it: it goes
+(github.com/{' or '.join(OWNERS)}/...) onto the owner's server and then run it: it goes
 live at https://<name>.{DOMAIN} with HTTPS. Every request except this page needs:
     Authorization: Bearer <token the owner gave you>
 Use curl (Cloudflare blocks Python's default urllib User-Agent; with Python
@@ -112,9 +136,9 @@ send a browser-like User-Agent header). At most {RATE_LIMIT} requests per minute
 2. POST /v1/publish  (Content-Type: application/json)
    {{
      "name": "berber",                      # -> https://berber.{DOMAIN}
-     "github": "hasaca-bot/berber-saas",
+     "github": "{OWNERS[0]}/berber-saas",
      "branch": "main",
-     "port": 4100,                          # 4100-4999, free (see /v1/sites)
+     "port": {PORT_MIN},                          # {PORT_MIN}-{PORT_MAX}, free (see /v1/sites)
      "dockerfile": "FROM python:3.12-slim\\n...",   # omit if the repo has a Dockerfile
      "health": "/health",                   # path answering 200 without login
      "volumes": ["/data"],
@@ -160,8 +184,8 @@ answer directly with their result.
 Limits: you only ever touch sites created through this gateway; cron and exec
 run only inside that site's own container (argv words are plain tokens: letters,
 digits and _ . / : = @ , + % - ; no spaces, quotes, pipes or $; no shell, no
-host access); at most {MAX_ENGINES_PER_SITE} databases per site; at most 10 cron
-jobs per site and never more often than every 5 minutes; exec stops after 60 s;
+host access); at most {MAX_ENGINES_PER_SITE} databases per site; at most {MAX_CRON} cron
+jobs per site and never more often than every {MIN_CRON_INTERVAL} minutes; exec stops after 60 s;
 environment keys are UPPER_SNAKE_CASE, may not start with SERVERKIT_, and the
 database URL keys belong to the database (remove it with db_delete); deleting a
 site needs confirm "DELETE <site>" and cannot be undone. One queued job runs at
@@ -198,14 +222,14 @@ def validate(spec):
     if not isinstance(name, str) or not NAME_RE.match(name) or name in RESERVED:
         return 'name: 3-32 chars, a-z 0-9 -, not reserved'
     repo = spec.get('github')
-    if not isinstance(repo, str) or not re.match(r'^hasaca-bot/[A-Za-z0-9._-]{1,100}$', repo):
-        return 'github: must be "hasaca-bot/<repo>"'
+    if not isinstance(repo, str) or not OWNER_RE.match(repo):
+        return f'github: must be {OWNER_TEXT}'
     branch = spec.get('branch', 'main')
     if not isinstance(branch, str) or not re.match(r'^[A-Za-z0-9._/-]{1,100}$', branch) or '..' in branch:
         return 'branch: invalid'
     port = spec.get('port')
-    if not isinstance(port, int) or isinstance(port, bool) or not 4100 <= port <= 4999:
-        return 'port: integer 4100-4999'
+    if not isinstance(port, int) or isinstance(port, bool) or not PORT_MIN <= port <= PORT_MAX:
+        return f'port: integer {PORT_MIN}-{PORT_MAX}'
     ports, names = used_ports_and_names()
     existing = names.get(name)
     if existing is not None and existing.get('origin') != 'gateway':
@@ -287,8 +311,8 @@ def _check_schedule(sched):
     if not mins:
         return 'schedule: bad minute field'
     gaps = [b - a for a, b in zip(mins, mins[1:])] + [mins[0] + 60 - mins[-1]]
-    if len(mins) > 1 and min(gaps) < 5:
-        return 'schedule: jobs may not run more often than every 5 minutes'
+    if len(mins) > 1 and min(gaps) < MIN_CRON_INTERVAL:
+        return f'schedule: jobs may not run more often than every {MIN_CRON_INTERVAL} minutes'
     return None
 
 
@@ -576,9 +600,9 @@ PUBLISH_SCHEMA = {
     'required': ['name', 'github', 'port'],
     'properties': {
         'name': {'type': 'string', 'description': f'Site name -> https://<name>.{DOMAIN}. 3-32 chars, a-z 0-9 -.'},
-        'github': {'type': 'string', 'description': 'Repository, must be "hasaca-bot/<repo>". Only pushed commits are published.'},
+        'github': {'type': 'string', 'description': f'Repository, must be {OWNER_TEXT}. Only pushed commits are published.'},
         'branch': {'type': 'string', 'default': 'main'},
-        'port': {'type': 'integer', 'minimum': 4100, 'maximum': 4999,
+        'port': {'type': 'integer', 'minimum': PORT_MIN, 'maximum': PORT_MAX,
                  'description': 'Port the app listens on inside the container (0.0.0.0). Must be free, see list_sites.'},
         'dockerfile': {'type': 'string', 'description': 'Dockerfile text. Omit only if the repository has a Dockerfile at its root.'},
         'health': {'type': 'string', 'default': '/', 'description': 'Path that answers 200 without login.'},
@@ -653,7 +677,7 @@ MCP_TOOLS = [
      'description': 'Scheduled commands of your site: id, schedule, argv, enabled.',
      'inputSchema': _schema(['site'], {'site': SITE_PROP})},
     {'name': 'add_cron',
-     'description': 'Schedule a command inside your site\'s own container (docker exec; no host shell). Max 10 jobs per site, never more often than every 5 minutes (the minute field may not be "*" or "*/n" with n<5).',
+     'description': f'Schedule a command inside your site\'s own container (docker exec; no host shell). Max {MAX_CRON} jobs per site, never more often than every {MIN_CRON_INTERVAL} minutes (the minute field may not be "*" or "*/n" with n<{MIN_CRON_INTERVAL}).',
      'inputSchema': _schema(['site', 'schedule', 'argv'], {
          'site': SITE_PROP,
          'schedule': {'type': 'string', 'description': 'Five cron fields "minute hour day-of-month month weekday", e.g. "*/10 * * * *" or "30 3 * * *". Only digits and * / , - are allowed.'},
@@ -708,7 +732,7 @@ def mcp_handle(msg, who):
             'protocolVersion': asked if asked in MCP_VERSIONS else MCP_VERSIONS[0],
             'capabilities': {'tools': {'listChanged': False}},
             'serverInfo': {'name': 'serverkit-publish', 'version': '2.0.0'},
-            'instructions': (f'Publishes web apps from GitHub (hasaca-bot) onto the owner\'s server at '
+            'instructions': (f'Publishes web apps from GitHub ({", ".join(OWNERS)}) onto the owner\'s server at '
                              f'https://<name>.{DOMAIN} and lets you run the sites you created: environment, logs, '
                              f'redeploy, stop/start, databases, cron and one-shot commands inside the site\'s container, '
                              f'delete. Call get_instructions first, then list_sites; slow actions return a job id to '
@@ -773,9 +797,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def authorized(self):
         ip = self.client_ip()
         now = time.time()
-        recent = [t for t in failures.get(ip, []) if now - t < 600]
-        if len(recent) >= 10:
-            self.send(429, {'error': 'too many failed attempts, wait 10 minutes'})
+        recent = [t for t in failures.get(ip, []) if now - t < BAD_KEY_WINDOW]
+        if len(recent) >= BAD_KEY_LIMIT:
+            self.send(429, {'error': f'too many failed attempts, wait {BAD_KEY_WINDOW // 60} minutes'})
             return False
         given = self.headers.get('Authorization', '')
         key = given[7:].strip() if given.startswith('Bearer ') else (getattr(self, 'path_key', None) or '')
@@ -798,6 +822,55 @@ class Handler(http.server.BaseHTTPRequestHandler):
         failures[ip] = recent + [now]
         self.send(401, {'error': 'missing or wrong token'}, headers={'WWW-Authenticate': 'Bearer'})
         return False
+
+    def proxy_core_mcp(self):
+        """gateway.mode "core": forward POST /mcp and /mcp/<key> to the panel's own MCP endpoint.
+
+        The client's key goes through unchanged (Authorization header as sent, or the
+        path key moved to /api/v1/mcp/k/<key>); status code, JSON body and the MCP headers
+        come back unchanged. The key is never logged (log_message masks /mcp/<key>, and
+        the upstream path is not logged at all). Repeated 401/403 answers from the panel
+        count as bad-key attempts and are throttled like in local mode."""
+        ip = self.client_ip()
+        now = time.time()
+        recent = [t for t in failures.get(ip, []) if now - t < BAD_KEY_WINDOW]
+        if len(recent) >= BAD_KEY_LIMIT:
+            return self.send(429, {'error': f'too many failed attempts, wait {BAD_KEY_WINDOW // 60} minutes'})
+        length = int(self.headers.get('Content-Length') or 0)
+        if length <= 0 or length > MAX_BODY:
+            return self.send(413, {'error': f'body must be 1..{MAX_BODY} bytes'})
+        body = self.rfile.read(length)
+        path = '/api/v1/mcp/k/' + self.path_key if self.path_key else '/api/v1/mcp'
+        headers = {'Content-Type': self.headers.get('Content-Type', 'application/json'),
+                   'Accept': self.headers.get('Accept', 'application/json, text/event-stream'),
+                   'X-Forwarded-For': ip, 'Connection': 'close'}
+        for name in ('Authorization', 'Mcp-Session-Id', 'MCP-Protocol-Version'):
+            if self.headers.get(name) and not (name == 'Authorization' and self.path_key):
+                headers[name] = self.headers[name]
+        conn = http.client.HTTPConnection(CORE_HOST, CORE_PORT, timeout=300)
+        try:
+            conn.request('POST', path, body=body, headers=headers)
+            resp = conn.getresponse()
+            payload = resp.read()
+            code, ctype = resp.status, resp.getheader('Content-Type') or 'application/json'
+            passed = {h: resp.getheader(h) for h in ('Mcp-Session-Id', 'WWW-Authenticate', 'Retry-After')
+                      if resp.getheader(h)}
+        except (OSError, http.client.HTTPException):
+            return self.send(502, {'error': f'panel MCP endpoint (127.0.0.1:{CORE_PORT}) is not reachable'})
+        finally:
+            conn.close()
+        if code in (401, 403):
+            failures[ip] = recent + [now]
+        else:
+            failures.pop(ip, None)
+        self.send_response(code)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Length', str(len(payload)))
+        self.send_header('Cache-Control', 'no-store')
+        for k, v in passed.items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(payload)
 
     def read_json(self, allow_empty=False):
         length = int(self.headers.get('Content-Length') or 0)
@@ -842,6 +915,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.take_path_key()
+        if MODE == 'core' and self.path == '/mcp':
+            return self.proxy_core_mcp()
         if not self.authorized():
             return
         if self.path == '/v1/publish':
@@ -885,7 +960,8 @@ def main():
             f.write(secrets.token_urlsafe(32))
     threading.Thread(target=worker, daemon=True).start()
     server = http.server.ThreadingHTTPServer(LISTEN, Handler)
-    print(f'gateway listening on {LISTEN[0]}:{LISTEN[1]}', flush=True)
+    print(f'gateway listening on {LISTEN[0]}:{LISTEN[1]} (mode {MODE}'
+          + (f', MCP -> panel 127.0.0.1:{CORE_PORT}/api/v1/mcp' if MODE == 'core' else '') + ')', flush=True)
     server.serve_forever()
 
 

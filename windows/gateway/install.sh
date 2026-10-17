@@ -5,21 +5,33 @@
 #   install.sh token      print the current token
 #   install.sh off        stop the gateway and remove its public route
 # Also installs serverkit-netlink (keeps site containers on the database network).
+# Owner values (domain, tunnel, ports, gateway mode) come from windows/serverkit-windows.json.
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/config.sh
+. "$SRC/../lib/config.sh"
 LIB=/usr/local/lib/serverkit-gateway
 TOKEN=/etc/serverkit-gateway/token
 NETLINKS=/etc/serverkit-gateway/netlinks
 UNIT=serverkit-gateway
 NETUNIT=serverkit-netlink
-HOST=deploy.tadadigital.shop
-PORT=8711
+HOST=""
+PORT=""
+CONFIG_FILE="${SERVERKIT_WINDOWS_CONFIG:-$SWK_DIR/serverkit-windows.json}"
 
 new_token() {
     mkdir -p --mode=0700 "$(dirname "$TOKEN")"
     ( umask 077; python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > "$TOKEN" )
 }
+
+# token / rotate / off do not need the config; install does.
+case "${1:-install}" in
+    install) swk_require_config
+             HOST="$(swk_cfg gateway_host)"; PORT="$(swk_cfg gateway_port)"
+             TUNNEL="$(swk_cfg tunnel)"; DOMAIN="$(swk_cfg domain)"
+             WILDCARD="$(swk_cfg wildcard)"; MODE="$(swk_cfg gateway_mode)" ;;
+esac
 
 case "${1:-install}" in
     token) cat "$TOKEN"; exit 0 ;;
@@ -33,7 +45,13 @@ case "${1:-install}" in
 esac
 
 mkdir -p "$LIB"
+# public address, read by the panel extension (Settings > API card)
+mkdir -p --mode=0700 "$(dirname "$TOKEN")"
+echo "https://$HOST" > "$(dirname "$TOKEN")/public_url"
 install -m 644 "$SRC/gateway.py" "$LIB/gateway.py"
+install -m 644 "$SWK_DIR/swk_config.py" "$LIB/swk_config.py"
+# the tunnel helper (domain-tunnel.sh) is what publish.py and the lines below call
+install -m 755 "$SWK_DIR/domain-tunnel.sh" /usr/local/sbin/serverkit-domain-tunnel
 [ -s "$TOKEN" ] || new_token
 
 # netlink: keeps site containers connected to the database network
@@ -59,13 +77,14 @@ EOF
 
 cat > "/etc/systemd/system/$UNIT.service" <<EOF
 [Unit]
-Description=ServerKit publish gateway (https://$HOST)
+Description=ServerKit publish gateway (https://$HOST, mode $MODE)
 After=network-online.target serverkit.service
 Wants=network-online.target
 
 [Service]
 ExecStart=/usr/bin/python3 $LIB/gateway.py
 Environment=GATEWAY_PORT=$PORT
+Environment=SERVERKIT_WINDOWS_CONFIG=$CONFIG_FILE
 Restart=always
 RestartSec=3
 
@@ -80,5 +99,12 @@ sleep 2
 for _ in 1 2 3 4 5 6 7 8 9 10; do systemctl is-active --quiet "$UNIT" && break; sleep 1; done
 systemctl is-active "$UNIT"
 systemctl is-active "$NETUNIT"
-/usr/local/sbin/serverkit-domain-tunnel add tada "$HOST=$PORT" >/dev/null
-echo "gateway on https://$HOST"
+# The gateway host keeps its own ingress rule (specific rules win over the wildcard);
+# with a wildcard record its DNS name is already covered.
+if [ "$WILDCARD" = true ]; then
+    SERVERKIT_TUNNEL_SKIP_DNS=1 /usr/local/sbin/serverkit-domain-tunnel add "$TUNNEL" "$HOST=$PORT" >/dev/null
+    /usr/local/sbin/serverkit-domain-tunnel wildcard "$DOMAIN" "$TUNNEL" >/dev/null
+else
+    /usr/local/sbin/serverkit-domain-tunnel add "$TUNNEL" "$HOST=$PORT" >/dev/null
+fi
+echo "gateway on https://$HOST (mode $MODE)"

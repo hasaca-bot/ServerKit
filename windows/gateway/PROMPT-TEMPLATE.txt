@@ -1,16 +1,16 @@
 Bu projeyi benim sunucumda yayınla.
 
-Eğer kullandığın yapay zekâ MCP destekliyorsa (ör. Claude Code), yayın geçidine MCP olarak bağlan: https://deploy.tadadigital.shop/mcp — aynı başlıkla: Authorization: Bearer {{TOKEN}}. Araçları kullan; önce get_instructions aracını çağır. MCP desteği yoksa aşağıdaki REST adımlarını izle.
+Eğer kullandığın yapay zekâ MCP destekliyorsa (ör. Claude Code), yayın geçidine MCP olarak bağlan: https://{{GATEWAY_HOST}}/mcp — aynı başlıkla: Authorization: Bearer {{TOKEN}}. Araçları kullan; önce get_instructions aracını çağır. MCP desteği yoksa aşağıdaki REST adımlarını izle.
 
-Sunucum bir yayın geçidi sunuyor: https://deploy.tadadigital.shop
+Sunucum bir yayın geçidi sunuyor: https://{{GATEWAY_HOST}}
 Bağlantı anahtarı (her istekte başlık olarak gönder):
   Authorization: Bearer {{TOKEN}}
 
 Yapman gerekenler:
-1. Önce kuralları oku: curl -s https://deploy.tadadigital.shop/  (anahtarsız açılır, nasıl kullanılacağı orada yazıyor)
+1. Önce kuralları oku: curl -s https://{{GATEWAY_HOST}}/  (anahtarsız açılır, nasıl kullanılacağı orada yazıyor)
 2. Hangi adların ve portların dolu olduğuna bak: GET /v1/sites
-3. Projeyi konteynerde çalışacak hale getir (0.0.0.0'da dinlesin, ayarları ortam değişkenlerinden okusun, veritabanı ve yüklemeler tek bir klasörde dursun), değişiklikleri commit edip GitHub'a (hasaca-bot hesabı) PUSH et. Sadece GitHub'a gönderilmiş kod yayınlanır.
-4. POST /v1/publish ile yayınla; adres https://<ad>.tadadigital.shop olacak. Gizli değerler (şifre, anahtar) için {"generate": ...} kullan, kendin uydurma. Her push'ta kendiliğinden güncellensin istiyorsam "auto_deploy": true yap.
+3. Projeyi konteynerde çalışacak hale getir (0.0.0.0'da dinlesin, ayarları ortam değişkenlerinden okusun, veritabanı ve yüklemeler tek bir klasörde dursun), değişiklikleri commit edip GitHub'a ({{GITHUB_OWNER}} hesabı) PUSH et. Sadece GitHub'a gönderilmiş kod yayınlanır.
+4. POST /v1/publish ile yayınla; adres https://<ad>.{{DOMAIN}} olacak. Gizli değerler (şifre, anahtar) için {"generate": ...} kullan, kendin uydurma. Her push'ta kendiliğinden güncellensin istiyorsam "auto_deploy": true yap.
 5. GET /v1/jobs/<id> ile iş bitene kadar 15-30 saniyede bir kontrol et. Hata olursa kaydı (log) oku, düzelt, push et, tekrar dene.
 6. Bitince siteyi kendin aç ve test et (ana sayfa + sağlık adresi), sonra bana: adresi, neyi test ettiğini, neyi test edemediğini ve yönetici şifresinin panelde (Services -> <ad> -> Environment) durduğunu yaz.
 
