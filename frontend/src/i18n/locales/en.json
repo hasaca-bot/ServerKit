@@ -3702,6 +3702,21 @@
             "updating": "Updating…",
             "versionByAuthor": "v{{version}} · by {{author}}"
         },
+        "mcpSettingsCard": {
+            "claudeCode": "Claude Code",
+            "connectorUrl": "Connector URL (claude.ai custom connectors)",
+            "copyNow": "Copy this key now. It will not be shown again; revoke it in the table above if it leaks.",
+            "createFailed": "Could not create the key",
+            "createKey": "Create MCP key",
+            "creating": "Creating…",
+            "endpoint": "Endpoint",
+            "genericJson": "Other MCP clients (JSON)",
+            "key": "MCP key",
+            "serverName": "Name in your client",
+            "subtitle": "Let an AI assistant publish and run your services. Tools act only on your own services; viewers get read-only tools.",
+            "title": "MCP server",
+            "urlIsSecret": "This URL contains your key: anyone who has it can act as you. Use it only where headers cannot be set, never share or commit it."
+        },
         "memberActionsCard": {
             "allowMembersToRunCuratedActions": "Allow members to run curated actions",
             "letWorkspaceMembersRunASmall": "Let workspace members run a small set of curated, parameterized actions (like adjusting a service's backup frequency) for services they can reach. Every action is validated against a fixed schema and audit-logged, so no free text ever reaches the server shell. Turn this off to disable the whole member-action surface.",
@@ -5972,6 +5987,7 @@
             "configureTelegramChatForNotifications": "Configure Telegram chat for notifications.",
             "configureTheApiKeyForThe": "Configure the API key for the selected AI provider.",
             "configureThePublicIpAddressFor": "Configure the public IP address for DNS A records.",
+            "connectAiAssistantsThroughMcp": "Connect AI assistants (Claude Code, claude.ai) to your services through MCP.",
             "connectCloudAccountsForServerProvisioning": "Connect cloud accounts for server provisioning.",
             "connectContainerRegistriesForDockerImage": "Connect container registries for Docker image pulls.",
             "connectDnsProvidersForDomainAnd": "Connect DNS providers for domain and HTTPS management.",
@@ -6019,6 +6035,7 @@
             "linksAndResources": "Links and resources",
             "logoImage": "Logo image",
             "managedAppPorts": "Managed service ports",
+            "mcpServer": "MCP server",
             "memoryMetrics": "Memory metrics",
             "migrationHistory": "Migration history",
             "monitorApiTrafficResponseTimesAnd": "Monitor API traffic, response times, and errors.",

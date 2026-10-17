@@ -32,6 +32,7 @@ import traceback as _traceback
 from flask import current_app, request
 
 from app.middleware.request_id import get_request_id
+from app.utils.secret_paths import mask_path
 
 
 def record_unexpected(exc, *, request_id=None):
@@ -46,7 +47,7 @@ def record_unexpected(exc, *, request_id=None):
     try:
         current_app.logger.exception(
             'Unhandled exception on %s %s [request_id=%s]',
-            request.method, request.path, request_id, exc_info=exc,
+            request.method, mask_path(request.path), request_id, exc_info=exc,
         )
     except Exception:  # noqa: BLE001 - reporting must never mask the crash
         pass

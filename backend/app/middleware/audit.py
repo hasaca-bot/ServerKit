@@ -7,6 +7,7 @@ from flask import g, request
 
 from app import db
 from app.models.audit_log import AuditLog
+from app.utils.secret_paths import mask_path
 
 logger = logging.getLogger(__name__)
 
@@ -96,14 +97,16 @@ def _get_user_id():
 def _build_details(response):
     details = {
         'method': request.method,
-        'path': request.path,
+        'path': mask_path(request.path),
         'endpoint': request.endpoint,
         'status_code': response.status_code,
         'success': 200 <= response.status_code < 400,
     }
 
     if request.view_args:
-        details['route_args'] = _sanitize(request.view_args)
+        details['route_args'] = _sanitize(
+            {k: ('<key>' if k == 'key' and request.blueprint == 'mcp' else val)
+             for k, val in request.view_args.items()})
 
     query = request.args.to_dict(flat=False)
     if query:

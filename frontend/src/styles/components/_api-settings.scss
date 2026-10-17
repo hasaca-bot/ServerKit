@@ -421,6 +421,34 @@
     }
 }
 
+// ─── MCP card ──────────────────────────────────────────
+
+.mcp-settings {
+    display: flex;
+    flex-direction: column;
+    gap: $space-4;
+}
+
+.mcp-settings__create {
+    display: flex;
+    align-items: flex-end;
+    gap: $space-3;
+    flex-wrap: wrap;
+
+    .form-group {
+        margin-bottom: 0;
+        min-inline-size: 220px;
+    }
+}
+
+.mcp-settings__warning {
+    display: flex;
+    align-items: center;
+    gap: $space-2;
+    color: $warning;
+    font-size: $text-sm;
+}
+
 // ─── Responsive ────────────────────────────────────────
 
 @media (max-width: $breakpoint-md) {

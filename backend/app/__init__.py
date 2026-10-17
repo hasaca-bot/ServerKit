@@ -444,6 +444,8 @@ def create_app(config_name=None):
             DeploymentJobService.register_jobs()
             from app.services.recipe_execution_service import RecipeExecutionService
             RecipeExecutionService.register_jobs()
+            from app.services.mcp.jobs import register_jobs as register_mcp_jobs
+            register_mcp_jobs()
             # WorkflowEngine.register_jobs() removed (engine retired).
             from app.services.backup_service import BackupService
             BackupService.register_jobs()
@@ -537,13 +539,14 @@ def create_app(config_name=None):
     # HTTP boundary owns their public shape and status-code mapping.
     from app.exceptions import ApplicationError
     from app.middleware.request_id import get_request_id
+    from app.utils.secret_paths import mask_path
 
     @app.errorhandler(ApplicationError)
     def application_error(e):
         request_id = get_request_id(create=True)
         app.logger.info(
             'Application error %s on %s %s [request_id=%s]: %s',
-            e.code, request.method, request.path, request_id, e.message,
+            e.code, request.method, mask_path(request.path), request_id, e.message,
         )
         return e.to_dict(request_id=request_id), e.status_code
 
@@ -576,7 +579,7 @@ def create_app(config_name=None):
             request_id = get_request_id(create=True)
             app.logger.warning(
                 'HTTP %s on %s %s [request_id=%s]: %s',
-                e.code, request.method, request.path, request_id, e.description,
+                e.code, request.method, mask_path(request.path), request_id, e.description,
             )
             return {
                 'error': e.description or e.name,
