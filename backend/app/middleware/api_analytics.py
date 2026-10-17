@@ -4,6 +4,8 @@ import threading
 import logging
 from flask import g, request
 
+from app.utils.secret_paths import mask_path
+
 logger = logging.getLogger(__name__)
 
 # Buffer for batch inserts
@@ -53,7 +55,7 @@ def register_api_analytics(app):
             'api_key_id': api_key.id if api_key else None,
             'user_id': user_id,
             'method': request.method,
-            'endpoint': request.path,
+            'endpoint': mask_path(request.path),
             'blueprint': request.blueprints[0] if request.blueprints else None,
             'status_code': response.status_code,
             'response_time_ms': round(elapsed_ms, 2),
