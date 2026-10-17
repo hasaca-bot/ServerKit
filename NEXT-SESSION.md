@@ -21,7 +21,12 @@ Done and pushed:
 - `NOTICE`, `scripts/gen-third-party-notices.sh`, `docs/legal/` templates
   (need a lawyer's review).
 
-Wave 2 (Opus only) — check `git log` to see whether these were merged:
+Wave 2 (Opus only) — MERGED (commits up to `fcddd43`), but both agents were
+stopped by the owner before their final full-suite run. Checked after merge:
+blueprint registry, authz static/sweep/boundary, jwt-only census and the new
+MCP/plan/tenant tests = 311 passed. NOT yet run: the full backend suite and
+the frontend `npm run lint` / `npm run build` on the merged branch — do that
+first and fix what fails. Migration chain: 111 → 112_plans_and_ownership (no 113).
 - **A. Tenancy, plans, quotas**: `plans` table (migration 112), real
   `PlanQuotaService`, enforcement on every create path, non-admins deploy only
   from their own GitHub connection, owner-scoped servers, `GET /api/v1/plan`,
@@ -31,8 +36,11 @@ Wave 2 (Opus only) — check `git log` to see whether these were merged:
   `rollback_site`, `restart_site`, `get_metrics`, `list_env_keys`,
   `list_domains`, `add_domain`, `remove_domain`, `list_previews`, `get_usage`;
   `docs/MCP.md`; MCP card in Settings → API.
-If they are not on the branch, their work is lost with the old container:
-re-run them from the specs in `docs/HOSTING-ROADMAP.md` §3 P0 and §5.
+Review both packages against their goals before building on them (the agents'
+own final reports were never delivered): every create path calls
+`PlanQuotaService.check`, non-admins cannot deploy raw git URLs or another
+user's connection, and every MCP tool resolves resources through tenant
+scoping (user B can never reach user A's site).
 
 ## 2. Agent rules (from the owner)
 
@@ -76,8 +84,8 @@ and replace `GEMINI_OAUTH_CREDS`.
    `python3 -m venv /home/user/sk-venv && /home/user/sk-venv/bin/pip install -r backend/requirements.txt pytest`),
    frontend `cd frontend && npm ci && npm run lint && npm run build`.
    The last full-suite run was cut off by a container restart.
-2. Finish/merge wave 2 (A, B) if missing; then point `windows/` gateway at
-   `mode: "core"` and test one publish end to end on the owner's PC.
+2. Point the `windows/` gateway at `mode: "core"` and test one publish end to
+   end on the owner's PC (create an API key with scope `mcp` in Settings → API).
 3. P1 from the roadmap: wake-on-request for sleeping free apps, service
    creation wizard polish, Events/usage pages, pre-deploy command and health
    check in UI and MCP.
