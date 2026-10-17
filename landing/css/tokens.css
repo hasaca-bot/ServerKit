@@ -1,0 +1,130 @@
+/* Design tokens: values mirror the panel (frontend/src/styles/_theme-variables.scss).
+   Dark is the default; light follows prefers-color-scheme unless the visitor
+   picked a theme (html[data-theme]). */
+
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400; font-display: swap; src: url("../fonts/ibm-plex-sans-400.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 500; font-display: swap; src: url("../fonts/ibm-plex-sans-500.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 600; font-display: swap; src: url("../fonts/ibm-plex-sans-600.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 700; font-display: swap; src: url("../fonts/ibm-plex-sans-700.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("../fonts/ibm-plex-mono-400.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url("../fonts/ibm-plex-mono-500.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 600; font-display: swap; src: url("../fonts/ibm-plex-mono-600.woff2") format("woff2"); }
+
+:root {
+  color-scheme: dark;
+
+  --bg: #0a0b0e;
+  --surface-0: #0d0f14;
+  --surface: #101218;
+  --surface-2: #161922;
+  --surface-3: #1c2029;
+  --surface-hover: #1a1e27;
+
+  --border: #23272f;
+  --border-soft: #191c23;
+  --border-strong: #2c313b;
+
+  --text: #e9ebf0;
+  --text-dim: #9aa1af;
+  --text-faint: #646b7a; /* decoration only: below AA for small text */
+
+  --accent: #6d7cff;
+  --accent-hover: #5a67e8;
+  --accent-ink: #0a0b0e;      /* text on accent fills (AA in both themes) */
+  --accent-text: #8b93ff;     /* accent used as text/link colour */
+  --accent-bg: rgba(109, 124, 255, 0.13);
+  --accent-bg-soft: rgba(109, 124, 255, 0.07);
+
+  --green: #3ddc97;  --green-text: #3ddc97;  --green-bg: rgba(61, 220, 151, 0.12);
+  --amber: #f5b945;  --amber-text: #f5b945;  --amber-bg: rgba(245, 185, 69, 0.12);
+  --red: #fb6f6f;    --red-text: #fb6f6f;    --red-bg: rgba(251, 111, 111, 0.12);
+  --cyan: #49c7f0;   --cyan-text: #49c7f0;
+
+  --bg-code: #0d1017;
+  --text-code: #e2e8f0;
+
+  --shadow-md: 0 8px 24px -8px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 20px 48px -12px rgba(0, 0, 0, 0.65);
+  --grid-color: rgba(255, 255, 255, 0.025);
+
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --container: 1120px;
+  --gutter: 16px;
+}
+
+@media (min-width: 720px) { :root { --gutter: 24px; } }
+
+/* Light theme: panel values; the *-text colours are darkened so small
+   status text still reaches 4.5:1 on white and on #f6f7fb. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f7fb;
+  --surface-0: #f1f3f9;
+  --surface: #ffffff;
+  --surface-2: #f6f7fb;
+  --surface-3: #eef1f7;
+  --surface-hover: #eef1f7;
+  --border: #e2e6ef;
+  --border-soft: #eef1f7;
+  --border-strong: #cdd3e0;
+  --text: #161a23;
+  --text-dim: #515a6b;
+  --text-faint: #79818f;
+  --accent-text: #4954cc;
+  --accent-bg: rgba(109, 124, 255, 0.10);
+  --accent-bg-soft: rgba(109, 124, 255, 0.05);
+  --green-text: #0a7048;  --green-bg: rgba(10, 112, 72, 0.10);
+  --amber-text: #8a5300;  --amber-bg: rgba(138, 83, 0, 0.10);
+  --red-text: #b42b2b;    --red-bg: rgba(180, 43, 43, 0.09);
+  --cyan-text: #0b6b8a;
+  --bg-code: #f1f3f9;
+  --text-code: #334155;
+  --shadow-md: 0 6px 16px -6px rgba(16, 24, 40, 0.12);
+  --shadow-lg: 0 16px 40px -12px rgba(16, 24, 40, 0.18);
+  --grid-color: rgba(109, 124, 255, 0.06);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f6f7fb;
+    --surface-0: #f1f3f9;
+    --surface: #ffffff;
+    --surface-2: #f6f7fb;
+    --surface-3: #eef1f7;
+    --surface-hover: #eef1f7;
+    --border: #e2e6ef;
+    --border-soft: #eef1f7;
+    --border-strong: #cdd3e0;
+    --text: #161a23;
+    --text-dim: #515a6b;
+    --text-faint: #79818f;
+    --accent-text: #4954cc;
+    --accent-bg: rgba(109, 124, 255, 0.10);
+    --accent-bg-soft: rgba(109, 124, 255, 0.05);
+    --green-text: #0a7048;  --green-bg: rgba(10, 112, 72, 0.10);
+    --amber-text: #8a5300;  --amber-bg: rgba(138, 83, 0, 0.10);
+    --red-text: #b42b2b;    --red-bg: rgba(180, 43, 43, 0.09);
+    --cyan-text: #0b6b8a;
+    --bg-code: #f1f3f9;
+    --text-code: #334155;
+    --shadow-md: 0 6px 16px -6px rgba(16, 24, 40, 0.12);
+    --shadow-lg: 0 16px 40px -12px rgba(16, 24, 40, 0.18);
+    --grid-color: rgba(109, 124, 255, 0.06);
+  }
+}
