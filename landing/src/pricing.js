@@ -68,7 +68,7 @@ window.PRICING = {
   matrix: [
     { group: "Limits", rows: [
       { label: "Members",                 values: ["1", "Unlimited", "Unlimited"] },
-      { label: "Services",                values: ["3", "25", "25"] },
+      { label: "Services",                values: ["3", "25", "100"] },
       { label: "Free database",           values: ["1", "1", "1"] },
       { label: "Sleep when idle",         values: ["After 15 min", "Free compute only", "Free compute only"] }
     ]},

@@ -101,7 +101,7 @@ Two products are sold on the same core:
 
 Workspace plans: **Hobby** $0 (1 member, 3 services, apps sleep after 15 min,
 1 database) · **Pro** $19/mo (unlimited members, 25 services, previews,
-custom domains, 5 MCP keys) · **Team** $59/mo (audit log, 30-day logs,
+custom domains, 5 MCP keys) · **Team** $59/mo (100 services, audit log, 30-day logs,
 priority support, SSO later).
 Compute per service: Free 0.1 CPU/256 MB (sleeps) · Starter $5 0.5 CPU/512 MB
 · Standard $12 1 CPU/2 GB · Pro $24 2 CPU/4 GB.
